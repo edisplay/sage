@@ -79,7 +79,47 @@ async function atomicWriteJson(path2, data) {
     throw err;
   }
 }
-var import_node_crypto, fs, fsPromises, import_node_os, import_node_path, name1, name2;
+async function removeStaleFileLock(lockPath, staleAgeMs) {
+  try {
+    const s = await fsPromises.stat(lockPath);
+    if (Date.now() - s.mtimeMs < staleAgeMs)
+      return;
+    await fsPromises.rmdir(lockPath);
+  } catch {
+  }
+}
+async function acquireFileLock(filePath, timeoutMs = 250, staleAgeMs = 3e4) {
+  const lockPath = `${filePath}.lock`;
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    try {
+      await fsPromises.mkdir(lockPath);
+      return async () => {
+        try {
+          await fsPromises.rmdir(lockPath);
+        } catch {
+        }
+      };
+    } catch {
+      await removeStaleFileLock(lockPath, staleAgeMs);
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0)
+        return void 0;
+      await (0, import_promises.setTimeout)(Math.min(50, remainingMs));
+    }
+  }
+}
+async function withFileLock(filePath, callback) {
+  const release = await acquireFileLock(filePath);
+  if (!release)
+    return;
+  try {
+    return await callback();
+  } finally {
+    await release();
+  }
+}
+var import_node_crypto, fs, fsPromises, import_node_os, import_node_path, import_promises, name1, name2;
 var init_file_utils = __esm({
   "../core/dist/file-utils.js"() {
     "use strict";
@@ -88,6 +128,7 @@ var init_file_utils = __esm({
     fsPromises = __toESM(require("node:fs/promises"), 1);
     import_node_os = require("node:os");
     import_node_path = require("node:path");
+    import_promises = require("node:timers/promises");
     name1 = "read";
     name2 = "File";
   }
@@ -4200,7 +4241,7 @@ var init_zod = __esm({
 });
 
 // ../core/dist/types.js
-var nullLogger, ArtifactTypeSchema, ArtifactSchema, VerdictSeveritySchema, ThreatSchema, DecisionSchema, SensitivitySchema, UrlCheckConfigSchema, CacheConfigSchema, LoggingConfigSchema, OperationalLogLevelSchema, OperationalLoggingConfigSchema, FileCheckConfigSchema, PackageCheckConfigSchema, AmsiCheckConfigSchema, DEFAULT_PI_HIGH_RISK_THRESHOLD, DEFAULT_PI_MEDIUM_RISK_THRESHOLD, PiCheckConfigSchema, ExceptionDecisionSchema, ExceptionMatchSchema, ExceptionRuleSchema, ExceptionsFileSchema, ExceptionsConfigSchema, ConfigSchema, HookTypeSchema;
+var nullLogger, ArtifactTypeSchema, ArtifactSchema, VerdictSeveritySchema, ThreatSchema, DecisionSchema, SensitivitySchema, UrlCheckConfigSchema, CacheConfigSchema, LoggingConfigSchema, OperationalLogLevelSchema, OperationalLoggingConfigSchema, FileCheckConfigSchema, PackageCheckConfigSchema, AmsiCheckConfigSchema, SkillCheckConfigSchema, DEFAULT_PI_HIGH_RISK_THRESHOLD, DEFAULT_PI_MEDIUM_RISK_THRESHOLD, DEFAULT_PI_TELEMETRY_THRESHOLD, PiCheckConfigSchema, ExceptionDecisionSchema, ExceptionMatchSchema, ExceptionRuleSchema, ExceptionsFileSchema, ExceptionsConfigSchema, ConfigSchema, HookTypeSchema;
 var init_types2 = __esm({
   "../core/dist/types.js"() {
     "use strict";
@@ -4277,14 +4318,24 @@ var init_types2 = __esm({
     AmsiCheckConfigSchema = external_exports.object({
       enabled: external_exports.boolean().default(true)
     });
+    SkillCheckConfigSchema = external_exports.object({
+      enabled: external_exports.boolean().default(true),
+      cache_ttl_days: external_exports.number().min(0).default(1),
+      /**
+       * Upload unknown skills (never seen by the analyzer) for deep content
+       * analysis. When false, the scan still looks skills up by content hash and
+       * still flags known-risky ones — but no skill content ever leaves the
+       * machine and the upload worker never runs (lookup-only mode).
+       */
+      upload_enabled: external_exports.boolean().default(true)
+    });
     DEFAULT_PI_HIGH_RISK_THRESHOLD = 0.99;
     DEFAULT_PI_MEDIUM_RISK_THRESHOLD = 0.5;
+    DEFAULT_PI_TELEMETRY_THRESHOLD = 0.95;
     PiCheckConfigSchema = external_exports.object({
       enabled: external_exports.boolean().default(false),
       max_content_length: external_exports.number().default(16384),
-      model_path: external_exports.string().optional(),
-      high_risk_threshold: external_exports.number().default(DEFAULT_PI_HIGH_RISK_THRESHOLD),
-      medium_risk_threshold: external_exports.number().default(DEFAULT_PI_MEDIUM_RISK_THRESHOLD)
+      model_path: external_exports.string().optional()
     });
     ExceptionDecisionSchema = external_exports.enum(["allow", "deny"]);
     ExceptionMatchSchema = external_exports.enum(["executable", "domain", "path", "plugin", "regex"]);
@@ -4306,6 +4357,7 @@ var init_types2 = __esm({
       file_check: FileCheckConfigSchema.default({}),
       package_check: PackageCheckConfigSchema.default({}),
       amsi_check: AmsiCheckConfigSchema.default({}),
+      skill_check: SkillCheckConfigSchema.default({}),
       pi_check: PiCheckConfigSchema.default({}),
       heuristics_enabled: external_exports.boolean().default(true),
       cache: CacheConfigSchema.default({}),
@@ -4314,6 +4366,7 @@ var init_types2 = __esm({
       operational_logging: OperationalLoggingConfigSchema.default({}),
       sensitivity: SensitivitySchema.default("balanced"),
       disabled_threats: external_exports.array(external_exports.string()).default([]),
+      announce_clean_scans: external_exports.boolean().default(true),
       brand_key: external_exports.string().min(1).max(32).regex(/^[a-z0-9_-]+$/u).optional(),
       community_iq: external_exports.boolean().default(true)
     });
@@ -4397,7 +4450,7 @@ function sanitizeBrandKey(data, logger2) {
   if (typeof brandKey === "string" && brandKey.length >= 1 && brandKey.length <= 32 && BRAND_KEY_RE.test(brandKey)) {
     return data;
   }
-  logger2.warn(`Invalid brand_key in config \u2014 ignoring`, { brand_key: brandKey });
+  logger2.warn(`Invalid brand_key in config - ignoring`, { brand_key: brandKey });
   const { brand_key: _, ...rest } = data;
   return rest;
 }
@@ -4449,6 +4502,21 @@ function parseConfig(raw, path2, logger2) {
     return defaultConfig(logger2);
   }
 }
+async function readExplicitSkillUploadEnabled(configPath, logger2 = nullLogger) {
+  const path2 = configPath ? resolvePath(configPath) : defaultConfigPath();
+  try {
+    const data = JSON.parse(await getFileContent(path2));
+    const skillCheck = data.skill_check;
+    if (skillCheck && typeof skillCheck === "object" && !Array.isArray(skillCheck) && "upload_enabled" in skillCheck) {
+      const value = skillCheck.upload_enabled;
+      if (typeof value === "boolean")
+        return { present: true, value };
+      logger2.warn("Config skill_check.upload_enabled is not a boolean; ignoring", { value });
+    }
+  } catch {
+  }
+  return { present: false, value: false };
+}
 async function loadConfig(configPath, logger2 = nullLogger) {
   const path2 = configPath ? resolvePath(configPath) : defaultConfigPath();
   try {
@@ -4457,7 +4525,7 @@ async function loadConfig(configPath, logger2 = nullLogger) {
     return defaultConfig(logger2);
   }
 }
-var import_node_path2, SAGE_DIR, BRAND_KEY_RE;
+var import_node_path2, SAGE_DIR, MS_PER_DAY, CLOCK_SKEW_TOLERANCE_MS, BRAND_KEY_RE;
 var init_config = __esm({
   "../core/dist/config.js"() {
     "use strict";
@@ -4465,6 +4533,8 @@ var init_config = __esm({
     init_file_utils();
     init_types2();
     SAGE_DIR = "~/.sage";
+    MS_PER_DAY = 24 * 60 * 60 * 1e3;
+    CLOCK_SKEW_TOLERANCE_MS = 5 * 60 * 1e3;
     BRAND_KEY_RE = /^[a-z0-9_-]+$/u;
   }
 });
@@ -20824,7 +20894,7 @@ function resolveBranding(brandKey, logger2) {
     return defaultBranding;
   const entry = BRANDS[brandKey];
   if (!entry) {
-    logger2?.warn(`Unknown brand_key "${brandKey}" in config \u2014 using default branding`);
+    logger2?.warn(`Unknown brand_key "${brandKey}" in config - using default branding`);
     return defaultBranding;
   }
   return { ...entry, brand_key: brandKey };
@@ -20841,88 +20911,226 @@ var APPROVED_TTL_MS = 10 * 60 * 1e3;
 // ../core/dist/audit-log.js
 var import_node_crypto2 = require("node:crypto");
 init_config();
+
+// ../core/dist/content-snapshot.js
+var import_node_os2 = require("node:os");
+var CONTENT_FIELD_LIMITS = Object.freeze({
+  command: 512,
+  url: 512,
+  file_path: 512,
+  package_name: 256,
+  package_version: 128,
+  package_registry: 128
+});
+function safeTruncate(value, maxLen) {
+  if (maxLen <= 0)
+    return "";
+  if (value.length <= maxLen)
+    return value;
+  const cutIndex = maxLen;
+  const codeUnit = value.charCodeAt(cutIndex - 1);
+  if (codeUnit >= 55296 && codeUnit <= 56319) {
+    return value.slice(0, cutIndex - 1);
+  }
+  return value.slice(0, cutIndex);
+}
+function scrubHomePath(value) {
+  const home = (0, import_node_os2.homedir)();
+  if (!home)
+    return value;
+  const normalizedHome = home.replace(/\\/g, "/").replace(/\/+$/, "");
+  if (!normalizedHome)
+    return value;
+  const normalizedValue = value.replace(/\\/g, "/");
+  if (normalizedValue === normalizedHome)
+    return "~";
+  if (normalizedValue.startsWith(`${normalizedHome}/`)) {
+    return `~/${normalizedValue.slice(normalizedHome.length + 1)}`;
+  }
+  return value;
+}
+function asString(v) {
+  return typeof v === "string" && v.length > 0 ? v : void 0;
+}
+function resolveFilePath(toolInput) {
+  return asString(toolInput.file_path) ?? asString(toolInput.filePath) ?? asString(toolInput.path);
+}
+function resolveWebFetchUrl(toolInput) {
+  const single = asString(toolInput.url);
+  if (single)
+    return single;
+  const urls = toolInput.urls;
+  if (Array.isArray(urls)) {
+    for (const u of urls) {
+      if (typeof u === "string" && u.length > 0)
+        return u;
+    }
+  }
+  return void 0;
+}
+function extractFirstApplyPatchPath(patchText) {
+  if (!patchText)
+    return void 0;
+  const headerMatch = /\*{3}\s+(?:Add|Update|Delete)\s+File:\s*(.+)/.exec(patchText);
+  if (headerMatch?.[1]) {
+    const trimmed = headerMatch[1].trim();
+    if (trimmed)
+      return trimmed;
+  }
+  const renameMatch = /\*{3}\s+(?:Move\s+to|Rename\s+File):\s*(.+)/i.exec(patchText);
+  if (renameMatch?.[1]) {
+    const raw = renameMatch[1].trim();
+    const arrow = raw.indexOf(" -> ");
+    if (arrow !== -1) {
+      const src = raw.slice(0, arrow).trim();
+      if (src)
+        return src;
+      const dst = raw.slice(arrow + 4).trim();
+      if (dst)
+        return dst;
+    } else if (raw) {
+      return raw;
+    }
+  }
+  return void 0;
+}
+function extractMcpContent(toolInput) {
+  const nestedRaw = toolInput.tool_input ?? toolInput.toolInput;
+  const candidate = nestedRaw && typeof nestedRaw === "object" && !Array.isArray(nestedRaw) ? nestedRaw : toolInput;
+  return {
+    command: asString(candidate.command),
+    url: asString(candidate.url) ?? resolveWebFetchUrl(candidate),
+    file_path: resolveFilePath(candidate)
+  };
+}
+function firstUrlArtifact(artifacts) {
+  for (const a of artifacts) {
+    if (a.type === "url" && typeof a.value === "string" && a.value.length > 0) {
+      return a.value;
+    }
+  }
+  return void 0;
+}
+function applyFieldLimits(content) {
+  for (const [key, value] of Object.entries(content)) {
+    if (typeof value !== "string")
+      continue;
+    let sanitized = value;
+    if (key === "file_path" || key === "command") {
+      sanitized = scrubHomePath(sanitized);
+    }
+    const limit = CONTENT_FIELD_LIMITS[key];
+    if (limit && sanitized.length > limit) {
+      sanitized = safeTruncate(sanitized, limit);
+    }
+    content[key] = sanitized;
+  }
+}
+function buildContentSnapshot(toolType, toolInput, artifacts = [], signals = {}) {
+  const content = {};
+  switch (toolType) {
+    case "Bash": {
+      const command = asString(toolInput.command);
+      if (command)
+        content.command = command;
+      break;
+    }
+    case "WebFetch": {
+      const url = resolveWebFetchUrl(toolInput) ?? firstUrlArtifact(artifacts);
+      if (url)
+        content.url = url;
+      break;
+    }
+    case "Write":
+    case "Edit":
+    case "Read":
+    case "Delete": {
+      const filePath = resolveFilePath(toolInput);
+      if (filePath)
+        content.file_path = filePath;
+      break;
+    }
+    case "ApplyPatch": {
+      const patchText = asString(toolInput.input) ?? asString(toolInput.patch) ?? "";
+      const filePath = extractFirstApplyPatchPath(patchText);
+      if (filePath)
+        content.file_path = filePath;
+      break;
+    }
+    case "MCP": {
+      const mcp = extractMcpContent(toolInput);
+      if (mcp.command)
+        content.command = mcp.command;
+      if (mcp.url)
+        content.url = mcp.url;
+      if (mcp.file_path)
+        content.file_path = mcp.file_path;
+      break;
+    }
+  }
+  if (!content.url && signals.url_checks && signals.url_checks.length > 0) {
+    const firstUrl = signals.url_checks[0]?.url;
+    if (firstUrl)
+      content.url = firstUrl;
+  }
+  if (signals.package_checks && signals.package_checks.length > 0) {
+    const p = signals.package_checks[0];
+    if (p?.package_name)
+      content.package_name = p.package_name;
+    if (p?.package_version)
+      content.package_version = p.package_version;
+    if (p?.package_registry)
+      content.package_registry = p.package_registry;
+  }
+  applyFieldLimits(content);
+  return content;
+}
+
+// ../core/dist/audit-log.js
 init_file_utils();
 
 // ../core/dist/jsonl-log-writer.js
-var import_promises = require("node:fs/promises");
+var import_promises2 = require("node:fs/promises");
 var import_node_path3 = require("node:path");
-var import_promises2 = require("node:timers/promises");
 init_config();
+init_file_utils();
 var writeQueues = /* @__PURE__ */ new Map();
-var ROTATE_LOCK_TIMEOUT_MS = 250;
-var ROTATE_LOCK_STALE_MS = 3e4;
-var ROTATE_LOCK_POLL_MS = 50;
 async function shouldRotate(filePath, maxBytes, maxFiles) {
   if (maxBytes <= 0 || maxFiles <= 0)
     return false;
   try {
-    const s = await (0, import_promises.stat)(filePath);
+    const s = await (0, import_promises2.stat)(filePath);
     return s.size >= maxBytes;
   } catch {
     return false;
   }
 }
-async function removeStaleRotateLock(lockPath) {
-  try {
-    const s = await (0, import_promises.stat)(lockPath);
-    if (Date.now() - s.mtimeMs < ROTATE_LOCK_STALE_MS)
-      return;
-    await (0, import_promises.rmdir)(lockPath);
-  } catch {
-  }
-}
-async function acquireRotateLock(filePath) {
-  const lockPath = `${filePath}.lock`;
-  const deadline = Date.now() + ROTATE_LOCK_TIMEOUT_MS;
-  while (true) {
-    try {
-      await (0, import_promises.mkdir)(lockPath);
-      return async () => {
-        try {
-          await (0, import_promises.rmdir)(lockPath);
-        } catch {
-        }
-      };
-    } catch {
-      await removeStaleRotateLock(lockPath);
-      const remainingMs = deadline - Date.now();
-      if (remainingMs <= 0)
-        return void 0;
-      await (0, import_promises2.setTimeout)(Math.min(ROTATE_LOCK_POLL_MS, remainingMs));
-    }
-  }
-}
 async function rotateIfNeeded(filePath, maxBytes, maxFiles) {
   if (!await shouldRotate(filePath, maxBytes, maxFiles))
     return;
-  const releaseLock = await acquireRotateLock(filePath);
-  if (!releaseLock)
-    return;
-  try {
+  await withFileLock(filePath, async () => {
     if (!await shouldRotate(filePath, maxBytes, maxFiles))
       return;
     try {
-      await (0, import_promises.unlink)(`${filePath}.${maxFiles}`);
+      await (0, import_promises2.unlink)(`${filePath}.${maxFiles}`);
     } catch {
     }
     for (let i = maxFiles - 1; i >= 1; i--) {
       try {
-        await (0, import_promises.rename)(`${filePath}.${i}`, `${filePath}.${i + 1}`);
+        await (0, import_promises2.rename)(`${filePath}.${i}`, `${filePath}.${i + 1}`);
       } catch {
       }
     }
     try {
-      await (0, import_promises.rename)(filePath, `${filePath}.1`);
+      await (0, import_promises2.rename)(filePath, `${filePath}.1`);
     } catch {
     }
-  } finally {
-    await releaseLock();
-  }
+  });
 }
 async function appendJsonlEntryNow(path2, config2, entry) {
-  await (0, import_promises.mkdir)((0, import_node_path3.dirname)(path2), { recursive: true });
+  await (0, import_promises2.mkdir)((0, import_node_path3.dirname)(path2), { recursive: true });
   await rotateIfNeeded(path2, config2.max_bytes, config2.max_files);
-  await (0, import_promises.appendFile)(path2, `${JSON.stringify(entry)}
+  await (0, import_promises2.appendFile)(path2, `${JSON.stringify(entry)}
 `);
 }
 async function appendJsonlEntry(config2, entry) {
@@ -20940,6 +21148,7 @@ async function appendJsonlEntry(config2, entry) {
 }
 
 // ../core/dist/audit-log.js
+init_types2();
 var MAX_SUMMARY_LEN = 200;
 var AUDIT_LOG_SCHEMA_VERSION = 1;
 function toolInputSummary(toolName, toolInput) {
@@ -20992,7 +21201,7 @@ async function logVerdict(config2, input) {
   } catch {
   }
 }
-async function findPiWarningInAuditLog(loggingConfig, toolUseId, piConfig) {
+async function findPiWarningInAuditLog(loggingConfig, toolUseId) {
   const entries = await getRecentEntries(loggingConfig, 20);
   for (const raw of entries.reverse()) {
     const e = raw;
@@ -21000,7 +21209,7 @@ async function findPiWarningInAuditLog(loggingConfig, toolUseId, piConfig) {
       continue;
     const signals = e.signals;
     const pi = signals?.pi_checks?.[0];
-    if (pi && pi.risk >= piConfig.medium_risk_threshold && pi.risk < piConfig.high_risk_threshold) {
+    if (pi && pi.risk >= DEFAULT_PI_MEDIUM_RISK_THRESHOLD && pi.risk < DEFAULT_PI_HIGH_RISK_THRESHOLD) {
       return { risk: pi.risk, contentName: pi.content_name };
     }
     break;
@@ -21819,7 +22028,7 @@ init_file_utils();
 var import_meta = {};
 function resolveVersion() {
   if (true)
-    return "0.11.0";
+    return "0.12.0";
   try {
     const pkgPath = (0, import_node_path4.join)((0, import_node_path4.dirname)((0, import_node_url.fileURLToPath)(import_meta.url)), "..", "package.json");
     const pkg = JSON.parse(getFileContentSync(pkgPath));
@@ -21967,7 +22176,7 @@ var FileCheckClient = class {
 // ../core/dist/model-storage.js
 var import_node_path5 = require("node:path");
 init_config();
-var MODEL_SCHEMA_VERSION = "v1";
+var MODEL_SCHEMA_VERSION = "v2";
 function getModelStorageRoot(sageDir = resolvePath("~/.sage")) {
   return (0, import_node_path5.join)(resolvePath(sageDir), "models");
 }
@@ -21979,8 +22188,11 @@ function getModelDir(modelName, schema = MODEL_SCHEMA_VERSION, sageDir) {
 init_types2();
 var STALE_LOCK_MS = 60 * 60 * 1e3;
 
+// ../core/dist/clients/model-manifest.js
+init_config();
+
 // ../core/dist/sage-proxy.js
-function mapSageProxyOs(platform) {
+function mapSageHostOs(platform) {
   switch (platform) {
     case "win32":
       return "WINDOWS";
@@ -21992,21 +22204,37 @@ function mapSageProxyOs(platform) {
       return platform;
   }
 }
-function mapSageProxyArchitecture(arch) {
+function mapSageHostArchitecture(arch) {
   return arch.toUpperCase();
+}
+function buildSageUserConfig(config2) {
+  return {
+    sensitivity: config2.sensitivity,
+    url_check_enabled: config2.url_check.enabled,
+    file_check_enabled: config2.file_check.enabled,
+    package_check_enabled: config2.package_check.enabled,
+    heuristics_enabled: config2.heuristics_enabled,
+    pi_check_enabled: config2.pi_check.enabled,
+    community_iq_enabled: config2.community_iq,
+    // Optional-chained + defaulted: real callers pass a loadConfig result (skill_check
+    // always present via the schema default), but this feeds fail-open telemetry, so a
+    // partial config must never crash the envelope build.
+    skill_check_upload_enabled: config2.skill_check?.upload_enabled ?? true
+  };
 }
 function buildSageProxyEnvelope(args) {
   return {
     identity: { uuid: args.iid },
     product: { version_app: args.versionApp },
     platform: {
-      os: args.platformOs ?? mapSageProxyOs(process.platform),
-      architecture: args.platformArchitecture ?? mapSageProxyArchitecture(process.arch)
+      os: args.platformOs ?? mapSageHostOs(process.platform),
+      architecture: args.platformArchitecture ?? mapSageHostArchitecture(process.arch)
     },
     agent: {
       agent_runtime: args.agentRuntime,
       agent_runtime_version: args.agentRuntimeVersion
-    }
+    },
+    ...args.config ? { config: buildSageUserConfig(args.config) } : {}
   };
 }
 
@@ -22514,11 +22742,18 @@ ${content.slice(-tailLen)}`;
 // ../core/dist/index.js
 init_pi_deps_installer();
 
+// ../core/dist/clients/skill-analyze.js
+init_types2();
+
 // ../core/dist/clients/skill-check.js
 init_types2();
 
 // ../core/dist/index.js
 init_config();
+
+// ../core/dist/config-defaults.js
+init_file_utils();
+init_types2();
 
 // ../core/dist/config-diagnostics.js
 init_config();
@@ -22590,180 +22825,6 @@ var SNIFF_CSV = /^[^,\n]+(?:,[^,\n]+){2,}$/m;
 function isScannableContent(content) {
   const head = content.slice(0, 4096);
   return SNIFF_HTML.test(head) || SNIFF_HTML_TAGS.test(head) || SNIFF_JSON.test(head) || SNIFF_XML.test(head) || SNIFF_YAML.test(head) || SNIFF_SHEBANG_SHELL.test(head) || SNIFF_SHEBANG_PYTHON.test(head) || SNIFF_PYTHON.test(head) || SNIFF_JS_TS.test(head) || SNIFF_C_CPP.test(head) || SNIFF_KOTLIN.test(head) || SNIFF_CSV.test(head);
-}
-
-// ../core/dist/content-snapshot.js
-var import_node_os2 = require("node:os");
-var CONTENT_FIELD_LIMITS = Object.freeze({
-  command: 512,
-  url: 512,
-  file_path: 512,
-  package_name: 256,
-  package_version: 128,
-  package_registry: 128
-});
-function safeTruncate(value, maxLen) {
-  if (maxLen <= 0)
-    return "";
-  if (value.length <= maxLen)
-    return value;
-  const cutIndex = maxLen;
-  const codeUnit = value.charCodeAt(cutIndex - 1);
-  if (codeUnit >= 55296 && codeUnit <= 56319) {
-    return value.slice(0, cutIndex - 1);
-  }
-  return value.slice(0, cutIndex);
-}
-function scrubHomePath(value) {
-  const home = (0, import_node_os2.homedir)();
-  if (!home)
-    return value;
-  const normalizedHome = home.replace(/\\/g, "/").replace(/\/+$/, "");
-  if (!normalizedHome)
-    return value;
-  const normalizedValue = value.replace(/\\/g, "/");
-  if (normalizedValue === normalizedHome)
-    return "~";
-  if (normalizedValue.startsWith(`${normalizedHome}/`)) {
-    return `~/${normalizedValue.slice(normalizedHome.length + 1)}`;
-  }
-  return value;
-}
-function asString(v) {
-  return typeof v === "string" && v.length > 0 ? v : void 0;
-}
-function resolveFilePath(toolInput) {
-  return asString(toolInput.file_path) ?? asString(toolInput.filePath) ?? asString(toolInput.path);
-}
-function resolveWebFetchUrl(toolInput) {
-  const single = asString(toolInput.url);
-  if (single)
-    return single;
-  const urls = toolInput.urls;
-  if (Array.isArray(urls)) {
-    for (const u of urls) {
-      if (typeof u === "string" && u.length > 0)
-        return u;
-    }
-  }
-  return void 0;
-}
-function extractFirstApplyPatchPath(patchText) {
-  if (!patchText)
-    return void 0;
-  const headerMatch = /\*{3}\s+(?:Add|Update|Delete)\s+File:\s*(.+)/.exec(patchText);
-  if (headerMatch?.[1]) {
-    const trimmed = headerMatch[1].trim();
-    if (trimmed)
-      return trimmed;
-  }
-  const renameMatch = /\*{3}\s+(?:Move\s+to|Rename\s+File):\s*(.+)/i.exec(patchText);
-  if (renameMatch?.[1]) {
-    const raw = renameMatch[1].trim();
-    const arrow = raw.indexOf(" -> ");
-    if (arrow !== -1) {
-      const src = raw.slice(0, arrow).trim();
-      if (src)
-        return src;
-      const dst = raw.slice(arrow + 4).trim();
-      if (dst)
-        return dst;
-    } else if (raw) {
-      return raw;
-    }
-  }
-  return void 0;
-}
-function extractMcpContent(toolInput) {
-  const nestedRaw = toolInput.tool_input ?? toolInput.toolInput;
-  const candidate = nestedRaw && typeof nestedRaw === "object" && !Array.isArray(nestedRaw) ? nestedRaw : toolInput;
-  return {
-    command: asString(candidate.command),
-    url: asString(candidate.url) ?? resolveWebFetchUrl(candidate),
-    file_path: resolveFilePath(candidate)
-  };
-}
-function firstUrlArtifact(artifacts) {
-  for (const a of artifacts) {
-    if (a.type === "url" && typeof a.value === "string" && a.value.length > 0) {
-      return a.value;
-    }
-  }
-  return void 0;
-}
-function applyFieldLimits(content) {
-  for (const [key, value] of Object.entries(content)) {
-    if (typeof value !== "string")
-      continue;
-    let sanitized = value;
-    if (key === "file_path" || key === "command") {
-      sanitized = scrubHomePath(sanitized);
-    }
-    const limit = CONTENT_FIELD_LIMITS[key];
-    if (limit && sanitized.length > limit) {
-      sanitized = safeTruncate(sanitized, limit);
-    }
-    content[key] = sanitized;
-  }
-}
-function buildContentSnapshot(toolType, toolInput, artifacts = [], signals = {}) {
-  const content = {};
-  switch (toolType) {
-    case "Bash": {
-      const command = asString(toolInput.command);
-      if (command)
-        content.command = command;
-      break;
-    }
-    case "WebFetch": {
-      const url = resolveWebFetchUrl(toolInput) ?? firstUrlArtifact(artifacts);
-      if (url)
-        content.url = url;
-      break;
-    }
-    case "Write":
-    case "Edit":
-    case "Read":
-    case "Delete": {
-      const filePath = resolveFilePath(toolInput);
-      if (filePath)
-        content.file_path = filePath;
-      break;
-    }
-    case "ApplyPatch": {
-      const patchText = asString(toolInput.input) ?? asString(toolInput.patch) ?? "";
-      const filePath = extractFirstApplyPatchPath(patchText);
-      if (filePath)
-        content.file_path = filePath;
-      break;
-    }
-    case "MCP": {
-      const mcp = extractMcpContent(toolInput);
-      if (mcp.command)
-        content.command = mcp.command;
-      if (mcp.url)
-        content.url = mcp.url;
-      if (mcp.file_path)
-        content.file_path = mcp.file_path;
-      break;
-    }
-  }
-  if (!content.url && signals.url_checks && signals.url_checks.length > 0) {
-    const firstUrl = signals.url_checks[0]?.url;
-    if (firstUrl)
-      content.url = firstUrl;
-  }
-  if (signals.package_checks && signals.package_checks.length > 0) {
-    const p = signals.package_checks[0];
-    if (p?.package_name)
-      content.package_name = p.package_name;
-    if (p?.package_version)
-      content.package_version = p.package_version;
-    if (p?.package_registry)
-      content.package_registry = p.package_registry;
-  }
-  applyFieldLimits(content);
-  return content;
 }
 
 // ../core/dist/extended-info.js
@@ -22983,10 +23044,10 @@ function resolveTimeoutMs() {
   const ms = Math.floor(parsed * 1e3);
   return Math.min(ms, MAX_EFFECTIVE_TIMEOUT_MS);
 }
-async function sendCommunityIqDetection(args) {
+async function sendCommunityIqTelemetry(args) {
   const logger2 = args.logger ?? nullLogger;
   if (!args.communityIqEnabled) {
-    logger2.debug("Community IQ disabled, skipping detection telemetry");
+    logger2.debug("Community IQ disabled, skipping telemetry");
     return;
   }
   let iid;
@@ -22995,15 +23056,17 @@ async function sendCommunityIqDetection(args) {
   } catch {
   }
   if (!iid) {
-    logger2.debug("Skipping detection telemetry: missing installation id");
+    logger2.debug("Skipping telemetry: missing installation id");
     return;
   }
   const envelope = buildSageProxyEnvelope({
     iid,
     versionApp: VERSION,
     agentRuntime: args.agentRuntime ?? "unknown",
-    agentRuntimeVersion: args.agentRuntimeVersion ?? process.env.SAGE_AGENT_RUNTIME_VERSION ?? "unknown"
+    agentRuntimeVersion: args.agentRuntimeVersion ?? process.env.SAGE_AGENT_RUNTIME_VERSION ?? "unknown",
+    config: args.config
   });
+  const blocking = args.blocking ?? true;
   const payload = {
     ...envelope,
     block_event: {
@@ -23012,8 +23075,8 @@ async function sendCommunityIqDetection(args) {
       // canonicalize before calling `evaluateToolCall`, so no further
       // mapping is needed here.
       tool_type: args.toolName,
-      verdict: "deny",
-      user_action: "blocked",
+      verdict: blocking ? "deny" : "suspicious",
+      ...blocking ? { user_action: "blocked" } : {},
       timestamp: (/* @__PURE__ */ new Date()).toISOString(),
       ...args.signals && Object.keys(args.signals).length > 0 ? { signals: args.signals } : {},
       content: args.content ?? {}
@@ -23024,20 +23087,21 @@ async function sendCommunityIqDetection(args) {
   const extendedInfo = await loadExtendedInfo(void 0, logger2).catch(() => null);
   const enriched = mergeExtendedInfo(payload, extendedInfo);
   const timeoutMs = resolveTimeoutMs();
+  const endpoint = blocking ? "/v2/detection" : "/v2/heuristic";
   try {
-    const response = await fetch(resolveEndpoint("/v2/detection"), {
+    const response = await fetch(resolveEndpoint(endpoint), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(enriched),
       signal: AbortSignal.timeout(timeoutMs)
     });
     if (!response.ok) {
-      logger2.warn("Detection telemetry send failed", {
+      logger2.warn("Community IQ telemetry send failed", {
         eventId: args.eventId,
         status: response.status
       });
     } else {
-      logger2.debug("Detection telemetry sent", {
+      logger2.debug("Community IQ telemetry sent", {
         eventId: args.eventId,
         toolName: args.toolName,
         hookType: args.hookType ?? "PreToolUse"
@@ -23048,6 +23112,29 @@ async function sendCommunityIqDetection(args) {
       eventId: args.eventId,
       error: String(err)
     });
+  }
+}
+
+// ../core/dist/e2e-capture.js
+var import_node_path11 = require("node:path");
+var CAPTURE_MAX_BYTES = 10 * 1024 * 1024;
+var CAPTURE_MAX_FILES = 2;
+function captureEnabled() {
+  return !!process.env.SAGE_E2E_CAPTURE_DIR;
+}
+async function captureHookInput(event, raw, normalized, options = {}) {
+  const dir = process.env.SAGE_E2E_CAPTURE_DIR;
+  if (!dir)
+    return;
+  try {
+    const prefix = options.filePrefix ?? "";
+    const base = event === "PreToolUse" ? "pre-tool-use.jsonl" : "post-tool-use.jsonl";
+    await appendJsonlEntry({
+      path: (0, import_node_path11.join)(dir, `${prefix}${base}`),
+      max_bytes: CAPTURE_MAX_BYTES,
+      max_files: CAPTURE_MAX_FILES
+    }, { event, raw, normalized });
+  } catch {
   }
 }
 
@@ -23274,13 +23361,13 @@ init_config();
 
 // ../core/dist/exceptions.js
 var import_node_crypto4 = require("node:crypto");
-var import_node_path12 = require("node:path");
+var import_node_path13 = require("node:path");
 init_config();
 init_file_utils();
 
 // ../core/dist/trusted-domains.js
 var import_promises5 = require("node:fs/promises");
-var import_node_path11 = require("node:path");
+var import_node_path12 = require("node:path");
 var import_yaml = __toESM(require_dist(), 1);
 init_file_utils();
 init_types2();
@@ -23294,7 +23381,7 @@ async function loadTrustedDomains(trustedDomainsDir, logger2 = nullLogger) {
   }
   const domains = [];
   for (const filename of files) {
-    const filePath = (0, import_node_path11.join)(trustedDomainsDir, filename);
+    const filePath = (0, import_node_path12.join)(trustedDomainsDir, filename);
     let content;
     try {
       content = await getFileContent(filePath);
@@ -23521,7 +23608,7 @@ function matchesDomain(pattern, url) {
 function normalizePatternPath(pattern) {
   const home = getHomeDir();
   const expanded = pattern.startsWith("~/") || pattern === "~" ? `${home}${pattern.slice(1)}` : pattern;
-  return (0, import_node_path12.normalize)(expanded);
+  return (0, import_node_path13.normalize)(expanded);
 }
 function matchesPath(pattern, filePath) {
   const hasWildcard = pattern.includes("*");
@@ -23532,7 +23619,7 @@ function matchesPath(pattern, filePath) {
   const normalizedPath = normalizePatternPath(filePath);
   if (normalizedPath === normalizedPattern)
     return true;
-  if (normalizedPath.startsWith(normalizedPattern + import_node_path12.sep))
+  if (normalizedPath.startsWith(normalizedPattern + import_node_path13.sep))
     return true;
   return false;
 }
@@ -24296,7 +24383,7 @@ function extractFromRequirementsTxt(content) {
 }
 
 // ../core/dist/statusline.js
-var import_node_path13 = require("node:path");
+var import_node_path14 = require("node:path");
 init_config();
 init_file_utils();
 var STATUS_PREFIX = "statusline-";
@@ -24305,15 +24392,17 @@ function sanitizeSessionId(sessionId) {
   return sessionId.replace(/[^a-zA-Z0-9-]/g, "_");
 }
 function statusFilePath(sessionId) {
-  return (0, import_node_path13.join)(resolvePath(SAGE_DIR), `${STATUS_PREFIX}${sanitizeSessionId(sessionId)}${STATUS_SUFFIX}`);
+  return (0, import_node_path14.join)(resolvePath(SAGE_DIR), `${STATUS_PREFIX}${sanitizeSessionId(sessionId)}${STATUS_SUFFIX}`);
 }
 function emptyStatus() {
+  const now = (/* @__PURE__ */ new Date()).toISOString();
   return {
     denied: 0,
     flagged: 0,
     lastCategory: null,
     lastReason: null,
-    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+    updatedAt: now,
+    startedAt: now
   };
 }
 async function readStatus(sessionId) {
@@ -24339,7 +24428,7 @@ async function updateSessionStatus(sessionId, verdict) {
 
 // ../core/dist/threat-loader.js
 var import_promises6 = require("node:fs/promises");
-var import_node_path14 = require("node:path");
+var import_node_path15 = require("node:path");
 var import_yaml2 = __toESM(require_dist(), 1);
 init_file_utils();
 init_types2();
@@ -24378,7 +24467,7 @@ async function loadThreats(threatDir, logger2 = nullLogger) {
     return threats;
   }
   for (const filename of files) {
-    const filePath = (0, import_node_path14.join)(threatDir, filename);
+    const filePath = (0, import_node_path15.join)(threatDir, filename);
     let content;
     try {
       content = await getFileContent(filePath);
@@ -24734,8 +24823,8 @@ async function evaluateToolCall(request, context) {
       amsiCheckResults: amsiCheckResults.length > 0 ? amsiCheckResults : void 0,
       piCheckResults: allPiResults,
       piThresholds: {
-        highRisk: config2.pi_check.high_risk_threshold,
-        mediumRisk: config2.pi_check.medium_risk_threshold
+        highRisk: DEFAULT_PI_HIGH_RISK_THRESHOLD,
+        mediumRisk: DEFAULT_PI_MEDIUM_RISK_THRESHOLD
       }
     });
   } else {
@@ -24826,7 +24915,7 @@ async function evaluateToolCall(request, context) {
     }
   }
   if (allPiResults.length > 0) {
-    const piSnippetFloor = config2.pi_check.medium_risk_threshold;
+    const piSnippetFloor = DEFAULT_PI_MEDIUM_RISK_THRESHOLD;
     auditSignals.pi_checks = allPiResults.map((r) => ({
       risk: r.risk,
       model_id: r.modelId,
@@ -24860,9 +24949,9 @@ async function evaluateToolCall(request, context) {
   } catch (error2) {
     logger2.debug("Audit verdict logging failed open", { error: String(error2) });
   }
-  if (verdict.decision === "deny") {
+  const submitTelemetry = async (blocking) => {
     try {
-      await sendCommunityIqDetection({
+      await sendCommunityIqTelemetry({
         eventId,
         agentRuntime: request.agentRuntime,
         agentRuntimeVersion: request.agentRuntimeVersion,
@@ -24871,11 +24960,18 @@ async function evaluateToolCall(request, context) {
         content: resolvedContent,
         signals: resolvedSignals,
         communityIqEnabled: config2.community_iq,
+        config: config2,
+        blocking,
         logger: logger2
       });
     } catch (error2) {
-      logger2.debug("Detection telemetry failed open", { error: String(error2) });
+      logger2.debug("Community IQ telemetry failed open", { error: String(error2) });
     }
+  };
+  if (verdict.decision === "deny") {
+    await submitTelemetry(true);
+  } else if (allPiResults.some((r) => r.risk >= DEFAULT_PI_TELEMETRY_THRESHOLD && r.risk < DEFAULT_PI_HIGH_RISK_THRESHOLD)) {
+    await submitTelemetry(false);
   }
   if (verdict.decision !== "allow") {
     try {
@@ -24884,7 +24980,7 @@ async function evaluateToolCall(request, context) {
       logger2.debug("Session status update failed open", { error: String(error2) });
     }
   }
-  const piWarnings = allPiResults.filter((r) => r.risk >= config2.pi_check.medium_risk_threshold && r.risk < config2.pi_check.high_risk_threshold);
+  const piWarnings = allPiResults.filter((r) => r.risk >= DEFAULT_PI_MEDIUM_RISK_THRESHOLD && r.risk < DEFAULT_PI_HIGH_RISK_THRESHOLD);
   if (piWarnings.length > 0 && config2.sensitivity !== "relaxed")
     verdict.piWarnings = piWarnings;
   logEvaluationCompleted(verdict);
@@ -25061,7 +25157,7 @@ function createPiProvider(config2, _context, logger2) {
   return new BundledPiProvider({
     modelPath: config2.pi_check.model_path,
     maxContentLength: config2.pi_check.max_content_length,
-    mediumRiskThreshold: config2.pi_check.medium_risk_threshold,
+    mediumRiskThreshold: DEFAULT_PI_MEDIUM_RISK_THRESHOLD,
     logger: logger2
   });
 }
@@ -25156,7 +25252,7 @@ async function evaluateToolOutput(request, context) {
       logger2.debug("PostToolUse audit logging failed open", { error: String(error2) });
     }
     try {
-      await sendCommunityIqDetection({
+      await sendCommunityIqTelemetry({
         eventId,
         agentRuntime: request.agentRuntime,
         agentRuntimeVersion: request.agentRuntimeVersion,
@@ -25165,10 +25261,13 @@ async function evaluateToolOutput(request, context) {
         content: resolvedContent,
         signals: resolvedSignals,
         communityIqEnabled: config2.community_iq,
+        config: config2,
+        // PostToolUse heuristic matches are real detections the user is warned about.
+        blocking: true,
         logger: logger2
       });
     } catch (error2) {
-      logger2.debug("PostToolUse detection telemetry failed open", { error: String(error2) });
+      logger2.debug("PostToolUse Community IQ telemetry failed open", { error: String(error2) });
     }
   }
   logger2.debug("Tool output evaluation completed", {
@@ -25230,6 +25329,32 @@ function formatPiWarning(warning, branding = defaultBranding) {
 // ../core/dist/guard.js
 init_config();
 init_types2();
+
+// ../core/dist/install-state.js
+init_config();
+init_file_utils();
+
+// ../core/dist/notices.js
+init_config();
+var SKILL_UPLOAD_NOTICE = {
+  id: "skill_upload_v1",
+  body: () => [
+    "unknown skills \u2014 each skill's SKILL.md and every supporting file in its",
+    "folder \u2014 will be uploaded and checked against potential malicious artifacts",
+    "starting next session. To keep skill content on this machine, set",
+    '"skill_check": { "upload_enabled": false } in ~/.sage/config.json.'
+  ],
+  // Suppressed once the user has explicitly set upload_enabled either way: an
+  // explicit choice needs no consent prompt (the rollout obeys it directly).
+  isEligible: async ({ configPath, logger: logger2 }) => !(await readExplicitSkillUploadEnabled(configPath, logger2)).present
+};
+var NOTICES = {
+  [SKILL_UPLOAD_NOTICE.id]: SKILL_UPLOAD_NOTICE
+};
+
+// ../core/dist/install-state.js
+init_types2();
+var SKILL_UPLOAD_NOTICE_ID = SKILL_UPLOAD_NOTICE.id;
 
 // ../core/dist/model-download.js
 init_types2();
@@ -25351,25 +25476,42 @@ function createOperationalLogger(config2, runtime) {
 }
 
 // ../core/dist/plugin-scan-cache.js
-var import_node_path15 = require("node:path");
+var import_node_path16 = require("node:path");
+init_config();
 init_file_utils();
 init_types2();
-var DEFAULT_CACHE_PATH = (0, import_node_path15.join)(getHomeDir(), ".sage", "plugin_scan_cache.json");
+var DEFAULT_CACHE_PATH = (0, import_node_path16.join)(getHomeDir(), ".sage", "plugin_scan_cache.json");
 
 // ../core/dist/plugin-scanner.js
 init_config();
 init_file_utils();
+
+// ../core/dist/skill-id.js
+var MAX_SKILL_BYTES = 50 * 1024 * 1024;
+
+// ../core/dist/skill-pending.js
+init_config();
+init_file_utils();
+init_types2();
+var PENDING_TTL_MS = 60 * 60 * 1e3;
+
+// ../core/dist/skill-verdict-cache.js
+init_config();
+init_file_utils();
+init_types2();
+
+// ../core/dist/plugin-scanner.js
 init_types2();
 var MAX_FILE_SIZE = 512 * 1024;
 
 // ../core/dist/product-version.js
 var import_node_fs3 = require("node:fs");
-var import_node_path16 = __toESM(require("node:path"), 1);
+var import_node_path17 = __toESM(require("node:path"), 1);
 function readProductJsonVersion(appRoot) {
   if (!appRoot)
     return "unknown";
   try {
-    const productJsonPath = import_node_path16.default.join(appRoot, "product.json");
+    const productJsonPath = import_node_path17.default.join(appRoot, "product.json");
     const raw = (0, import_node_fs3.readFileSync)(productJsonPath, "utf8");
     const parsed = JSON.parse(raw);
     const version2 = parsed.version;
@@ -25394,6 +25536,7 @@ init_types2();
 init_types2();
 
 // ../core/dist/version-check.js
+init_config();
 init_types2();
 
 // ../core/dist/tool-names.js
@@ -35783,7 +35926,8 @@ ${reasoning}`;
             iid,
             versionApp,
             agentRuntime: agent_runtime,
-            agentRuntimeVersion: runtimeVersion
+            agentRuntimeVersion: runtimeVersion,
+            config: config2
           }),
           block_event: {
             hook_type,
@@ -35874,11 +36018,11 @@ function createSageMcpServer(options) {
 }
 
 // src/hook-handlers.ts
-var import_node_path18 = require("node:path");
+var import_node_path19 = require("node:path");
 
 // src/approval-tracker.ts
 var import_promises7 = require("node:fs/promises");
-var import_node_path17 = require("node:path");
+var import_node_path18 = require("node:path");
 var PENDING_STALE_MS2 = 60 * 60 * 1e3;
 var CONSUMED_TTL_MS = 10 * 60 * 1e3;
 var STALE_FILE_MS = 2 * 60 * 60 * 1e3;
@@ -35886,10 +36030,10 @@ function resolvedSageDir2() {
   return resolvePath(SAGE_DIR);
 }
 function pendingPath(sessionId) {
-  return (0, import_node_path17.join)(resolvedSageDir2(), `pending-approvals-${sanitizeSessionId(sessionId)}.json`);
+  return (0, import_node_path18.join)(resolvedSageDir2(), `pending-approvals-${sanitizeSessionId(sessionId)}.json`);
 }
 function consumedPath(sessionId) {
-  return (0, import_node_path17.join)(resolvedSageDir2(), `consumed-approvals-${sanitizeSessionId(sessionId)}.json`);
+  return (0, import_node_path18.join)(resolvedSageDir2(), `consumed-approvals-${sanitizeSessionId(sessionId)}.json`);
 }
 async function loadJson(path2) {
   try {
@@ -36034,7 +36178,7 @@ function formatBlockReason(verdict, branding = defaultBranding) {
 
 // src/hook-handlers.ts
 function getPluginRoot() {
-  return (0, import_node_path18.resolve)(__dirname, "..", "..", "..");
+  return (0, import_node_path19.resolve)(__dirname, "..", "..", "..");
 }
 function makePreToolUseResponse(verdict, branding = defaultBranding) {
   if (verdict.decision === "allow") return {};
@@ -36125,8 +36269,8 @@ async function handlePreToolUseHook(toolCall, options) {
       toolUseId
     },
     {
-      threatsDir: (0, import_node_path18.join)(pluginRoot, "threats"),
-      trustedDomainsDir: (0, import_node_path18.join)(pluginRoot, "trusted-domains"),
+      threatsDir: (0, import_node_path19.join)(pluginRoot, "threats"),
+      trustedDomainsDir: (0, import_node_path19.join)(pluginRoot, "trusted-domains"),
       config: config2,
       logger: logger2,
       acquireAmsiClientLease: options.acquireAmsiClientLease
@@ -36189,7 +36333,7 @@ async function handlePostToolUseHook(hookInput, options) {
   }
   if (toolName === "WebFetch" && toolUseId && config2.logging.enabled && config2.sensitivity !== "relaxed") {
     try {
-      const piWarning = await findPiWarningInAuditLog(config2.logging, toolUseId, config2.pi_check);
+      const piWarning = await findPiWarningInAuditLog(config2.logging, toolUseId);
       if (piWarning) {
         contextParts.push(`\u{1F6E1}\uFE0F ${formatPiWarning(piWarning, branding)}`);
       }
@@ -36211,8 +36355,8 @@ async function handlePostToolUseHook(hookInput, options) {
       toolUseId
     },
     {
-      threatsDir: (0, import_node_path18.join)(pluginRoot, "threats"),
-      trustedDomainsDir: (0, import_node_path18.join)(pluginRoot, "trusted-domains"),
+      threatsDir: (0, import_node_path19.join)(pluginRoot, "threats"),
+      trustedDomainsDir: (0, import_node_path19.join)(pluginRoot, "trusted-domains"),
       config: config2,
       logger: logger2
     }
@@ -36513,6 +36657,7 @@ function registerClaudeHookTools(server, options = {}) {
       let branding = defaultBranding;
       try {
         const hookInput = normalizeClaudeHookInput(args);
+        if (captureEnabled()) await captureHookInput("PreToolUse", args, hookInput);
         logNormalizationDiagnostics(logger2, "PreToolUse", args, hookInput);
         const runtime = await loadCachedRuntime();
         branding = runtime.branding;
@@ -36561,6 +36706,7 @@ function registerClaudeHookTools(server, options = {}) {
     async (args) => {
       try {
         const hookInput = normalizeClaudeHookInput(args);
+        if (captureEnabled()) await captureHookInput("PostToolUse", args, hookInput);
         logNormalizationDiagnostics(logger2, "PostToolUse", args, hookInput);
         const { config: config2, branding } = await loadCachedRuntime();
         logger2.debug("PostToolUse hook started", {
@@ -36648,7 +36794,7 @@ async function main() {
   const shutdown = registerProcessShutdown();
   const branding = resolveBranding(config2.brand_key, logger);
   const server = createSageMcpServer({
-    version: "0.11.0",
+    version: "0.12.0",
     logger,
     branding
   });
@@ -36670,7 +36816,7 @@ async function main() {
   await server.connect(transport);
   logger.debug("MCP server connected", {
     serverName: branding.name.toLowerCase(),
-    version: "0.11.0"
+    version: "0.12.0"
   });
 }
 main().catch(async (e) => {

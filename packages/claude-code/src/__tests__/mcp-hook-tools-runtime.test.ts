@@ -40,6 +40,10 @@ vi.mock("@gendigital/sage-core", () => ({
 		}
 	},
 	allowVerdict: mocks.allowVerdict,
+	// The E2E capture sink (moved into core) is imported by mcp-hook-tools; keep it
+	// inert here so the handler path under test behaves as in production.
+	captureEnabled: () => false,
+	captureHookInput: vi.fn(),
 	ConfigSchema: mocks.ConfigSchema,
 	defaultBranding: { name: "Sage" },
 	isAmsiSupported: mocks.isAmsiSupported,

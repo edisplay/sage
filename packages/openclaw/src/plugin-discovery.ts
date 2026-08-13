@@ -6,29 +6,53 @@
 import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Branding, Logger, PluginInfo } from "@gendigital/sage-core";
-import { defaultBranding, getFileContent } from "@gendigital/sage-core";
+import type { Branding, Logger, PluginInfo, SkillRoot } from "@gendigital/sage-core";
+import {
+	defaultBranding,
+	discoverLooseSkillsAcrossRoots,
+	getFileContent,
+	getHomeDir,
+} from "@gendigital/sage-core";
 
 const DEFAULT_EXTENSIONS_DIR = join(homedir(), ".openclaw", "extensions");
+
+/**
+ * Personal loose-skill roots OpenClaw loads (priorities 3–4 of its documented
+ * order): `~/.agents/skills` and `~/.openclaw/skills`. Keyed by scope so they
+ * never collide with the same-named families in other connectors' caches.
+ *
+ * Only these two are covered. The workspace-relative roots (priorities 1–2)
+ * would need a workspace path, which OpenClaw's plugin API never hands the
+ * plugin (scan events take no args; tool context exposes only a session key).
+ * Bundled skills (priority 5) sit inside the trusted install, and plugin skills
+ * (priority 6) are already covered by the extension scan below.
+ */
+const SKILL_ROOTS: SkillRoot[] = [
+	{ dir: join(getHomeDir(), ".agents", "skills"), tag: "agents", scope: "personal" },
+	{ dir: join(getHomeDir(), ".openclaw", "skills"), tag: "openclaw", scope: "personal" },
+];
 
 export async function discoverOpenClawPlugins(
 	logger: Logger,
 	extensionsDir = DEFAULT_EXTENSIONS_DIR,
 	branding: Branding = defaultBranding,
+	// Injectable so tests can isolate loose-skill discovery from the real home
+	// dir (SKILL_ROOTS resolves under getHomeDir()); pass `[]` to disable it.
+	skillRoots: SkillRoot[] = SKILL_ROOTS,
 ): Promise<PluginInfo[]> {
 	logger.debug(`${branding.name} plugin discovery: scanning extensions directory`, {
 		path: extensionsDir,
 	});
+
+	const plugins: PluginInfo[] = [];
 
 	let entries: string[];
 	try {
 		entries = await readdir(extensionsDir);
 	} catch {
 		logger.debug("OpenClaw extensions directory not found", { path: extensionsDir });
-		return [];
+		entries = [];
 	}
-
-	const plugins: PluginInfo[] = [];
 
 	for (const entry of entries) {
 		const extDir = join(extensionsDir, entry);
@@ -70,5 +94,12 @@ export async function discoverOpenClawPlugins(
 	}
 
 	logger.debug(`${branding.name} plugin discovery: found ${plugins.length} extension(s)`);
+
+	// Loose skills join the scan as pseudo-plugins (deduped by resolved path,
+	// fails open per root) so skills installed outside any extension are covered.
+	const skills = await discoverLooseSkillsAcrossRoots(skillRoots);
+	logger.debug(`${branding.name} skill discovery: found ${skills.length} loose skill(s)`);
+	plugins.push(...skills);
+
 	return plugins;
 }

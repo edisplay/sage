@@ -38,7 +38,7 @@ function sendToMcp(
 			child.stdin?.write(`${msg}\n`);
 		}
 
-		setTimeout(() => child.stdin?.end(), 2_000);
+		setTimeout(() => child.stdin?.end(), 5_000);
 	});
 }
 

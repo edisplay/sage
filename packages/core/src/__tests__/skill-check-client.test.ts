@@ -8,7 +8,7 @@ describe("SkillCheckClient", () => {
 		globalThis.fetch = originalFetch;
 	});
 
-	it("parses a HIGH verdict with recommendations", async () => {
+	it("parses a HIGH verdict", async () => {
 		const id = "a".repeat(64);
 		globalThis.fetch = vi.fn().mockResolvedValue({
 			ok: true,
@@ -19,12 +19,6 @@ describe("SkillCheckClient", () => {
 						skill_id: id,
 						verdict: "HIGH",
 						summary: "This skill executes remote code from an untrusted domain.",
-						overall_risk_level: "HIGH",
-						recommendations: [
-							"HIGH: Downloads and executes remote code",
-							"AI detected serious security threats",
-						],
-						threat_categories: ["REMOTE_CODE_EXECUTION"],
 					},
 				},
 			}),
@@ -35,11 +29,8 @@ describe("SkillCheckClient", () => {
 		const verdict = verdicts.get(id);
 
 		expect(verdict).not.toBeNull();
-		expect(verdict?.overallRiskLevel).toBe("HIGH");
+		expect(verdict?.verdict).toBe("HIGH");
 		expect(verdict?.summary).toContain("remote code");
-		expect(verdict?.recommendations).toHaveLength(2);
-		expect(verdict?.recommendations[0]).toContain("HIGH");
-		expect(verdict?.threatCategories).toEqual(["REMOTE_CODE_EXECUTION"]);
 	});
 
 	it("treats explicit null result as no opinion (and surfaces it as null)", async () => {
@@ -49,6 +40,19 @@ describe("SkillCheckClient", () => {
 			json: async () => ({
 				results: { [id]: null },
 			}),
+		});
+
+		const client = new SkillCheckClient();
+		const verdicts = await client.checkSkills([id]);
+		expect(verdicts.has(id)).toBe(true);
+		expect(verdicts.get(id)).toBeNull();
+	});
+
+	it("treats skill absent from successful response as null (no opinion, not an error)", async () => {
+		const id = "b".repeat(64);
+		globalThis.fetch = vi.fn().mockResolvedValue({
+			ok: true,
+			json: async () => ({ results: {} }),
 		});
 
 		const client = new SkillCheckClient();
@@ -121,10 +125,8 @@ describe("SkillCheckClient", () => {
 					results: {
 						[id0]: {
 							skill_id: id0,
-							overall_risk_level: "CRITICAL",
+							verdict: "CRITICAL",
 							summary: "boom",
-							recommendations: ["nope"],
-							threat_categories: [],
 						},
 					},
 				}),
@@ -134,7 +136,7 @@ describe("SkillCheckClient", () => {
 		const client = new SkillCheckClient();
 		const verdicts = await client.checkSkills(ids);
 
-		expect(verdicts.get(id0)?.overallRiskLevel).toBe("CRITICAL");
+		expect(verdicts.get(id0)?.verdict).toBe("CRITICAL");
 	});
 
 	it("de-duplicates ids across batches", async () => {
@@ -153,16 +155,16 @@ describe("SkillCheckClient", () => {
 		expect(body.skill_ids).toEqual([id]);
 	});
 
-	it("ignores non-string recommendations / categories defensively", async () => {
+	it("ignores unknown fields in the response defensively", async () => {
 		const id = "f".repeat(64);
 		globalThis.fetch = vi.fn().mockResolvedValue({
 			ok: true,
 			json: async () => ({
 				results: {
 					[id]: {
-						overall_risk_level: "HIGH",
-						recommendations: ["ok", 42, null, "still ok"],
-						threat_categories: [true, "RCE", 1],
+						verdict: "HIGH",
+						summary: "ok",
+						unknown_field: "ignored",
 					},
 				},
 			}),
@@ -170,7 +172,7 @@ describe("SkillCheckClient", () => {
 
 		const client = new SkillCheckClient();
 		const verdict = (await client.checkSkills([id])).get(id);
-		expect(verdict?.recommendations).toEqual(["ok", "still ok"]);
-		expect(verdict?.threatCategories).toEqual(["RCE"]);
+		expect(verdict?.verdict).toBe("HIGH");
+		expect(verdict?.summary).toBe("ok");
 	});
 });

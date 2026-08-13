@@ -1,0 +1,9 @@
+{
+	"tool": "bash",
+	"sessionID": "ses_00000000000000000000000000",
+	"callID": "call_000000000000000000000000",
+	"args": {
+		"command": "echo opencode_drift_probe_9f3c2a18",
+		"description": "Run echo command"
+	}
+}

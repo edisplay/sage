@@ -8,12 +8,16 @@ import {
 	ConfigSchema,
 	checkAllowlistMigration,
 	createOperationalLogger,
+	foreignSourceRuntime,
 	formatAllowlistMigrationWarning,
 	formatConfigurationWarnings,
+	formatNoticeById,
 	getConfigurationWarningsSync,
 	getRecentEntries,
+	type Logger,
 	loadConfig,
 	loadConfigSync,
+	loadSkillVerdictCache,
 	resolveBranding,
 	resolvePath,
 	type SessionStatus,
@@ -76,6 +80,11 @@ export function activateManagedHooksExtension(
 		config.operational_logging,
 		runtimeForHost(target.hostName),
 	).forComponent("extension");
+
+	// Watch ~/.sage/ for new risky skill verdicts (written by the skill-upload
+	// worker) and surface them as a toast.
+	setupSkillFindingsWatcher(context, branding, logger, runtimeForHost(target.hostName));
+
 	const scanHandler = createExtensionScanHandler(
 		context,
 		target.hostName,
@@ -90,6 +99,15 @@ export function activateManagedHooksExtension(
 				logger.debug("Extension scan result surfaced", { messageLength: msg.length });
 			}
 		},
+		// One-time notices (e.g. skill-upload consent) — shown independently of the
+		// threat/update banner so they surface even on a clean scan.
+		(noticeIds) => {
+			for (const id of noticeIds) {
+				const text = formatNoticeById(id, branding);
+				if (text) void vscode.window.showInformationMessage(text);
+			}
+		},
+		config.announce_clean_scans,
 	);
 	scanHandler().catch(() => {});
 
@@ -328,6 +346,81 @@ function setupStatusFileWatcher(context: vscode.ExtensionContext, branding: Bran
 		});
 	} catch {
 		// ~/.sage/ may not exist yet — watcher will be absent, no notifications
+		return;
+	}
+
+	if (watcher) {
+		context.subscriptions.push({ dispose: () => watcher.close() });
+	}
+}
+
+/**
+ * Watch the skill verdict cache (written by the detached skill-upload worker)
+ * and toast when a HIGH/CRITICAL verdict first appears *while the IDE is open*.
+ * Verdicts already in the cache at activation are seeded silently — the watcher
+ * can't tell whether their skill is still installed, so re-surfacing known-risky
+ * skills is the scan's job (it only fires for skills that are actually present).
+ * The in-session `notified` set prevents toasting the same skill twice.
+ */
+function setupSkillFindingsWatcher(
+	context: vscode.ExtensionContext,
+	branding: Branding,
+	logger: Logger,
+	agentRuntime: AgentRuntime,
+): void {
+	const sageDir = resolvePath("~/.sage");
+	const notified = new Set<string>();
+	let watcher: FSWatcher | undefined;
+
+	const scanVerdicts = async (seedOnly: boolean): Promise<void> => {
+		try {
+			const cache = await loadSkillVerdictCache();
+			for (const [skillId, verdict] of Object.entries(cache.entries)) {
+				if (notified.has(skillId)) continue;
+				notified.add(skillId);
+				if (seedOnly) continue;
+
+				const risk = (verdict.verdict ?? "").toUpperCase();
+				if (risk !== "HIGH" && risk !== "CRITICAL") continue;
+
+				const containerKey = verdict.sources?.find((s) => s.containerKey)?.containerKey ?? "";
+				const skillMatch = containerKey.match(/^skill:([^/@]+)\/(.+)@(\w+)$/);
+				const skillDisplay = skillMatch ? `.${skillMatch[1]}/${skillMatch[2]}` : verdict.skillName;
+				const scope = skillMatch?.[3];
+				const scopeLabel = scope === "personal" || scope === "project" ? ` ${scope}` : "";
+				const name = skillDisplay ? ` "${skillDisplay}"` : "";
+				const subject =
+					risk === "CRITICAL"
+						? `Malicious${scopeLabel} skill${name}`
+						: `Suspicious${scopeLabel} skill${name}`;
+				const summary = verdict.summary?.trim();
+				const detail = summary ? `${subject} — ${summary}` : `${subject} detected`;
+				const origin = foreignSourceRuntime(verdict.sources, agentRuntime);
+				if (origin) continue;
+				logger.debug("Skill finding toast shown", {
+					skillId: skillId.slice(0, 12),
+					risk,
+				});
+
+				void vscode.window.showWarningMessage(`${branding.short_name}: ${detail} (${risk})`);
+			}
+		} catch (e) {
+			logger.debug("Skill verdict watcher scan failed", { error: String(e) });
+		}
+	};
+
+	try {
+		mkdirSync(sageDir, { recursive: true });
+		// Seed existing verdicts silently (their skills may no longer be installed),
+		// then toast only verdicts written while the IDE is open.
+		void scanVerdicts(true);
+		watcher = watch(sageDir, (_eventType, filename) => {
+			if (filename === "skill_verdict_cache.json") void scanVerdicts(false);
+		});
+		logger.debug("Skill findings watcher attached", { sageDir });
+	} catch (e) {
+		// ~/.sage/ may not exist yet — no watcher, no notifications.
+		logger.debug("Skill findings watcher setup failed", { error: String(e) });
 		return;
 	}
 

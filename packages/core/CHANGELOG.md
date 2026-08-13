@@ -1,5 +1,23 @@
 # @gendigital/sage-core
 
+## 0.12.0
+
+### Minor Changes
+
+- Add skill verdict caching and async upload worker for security analysis
+
+- scan personal skills and surface verdicts on the status line
+
+- wire the skill-upload worker into the OpenCode connector so queued unknown skills are uploaded for analysis
+
+- Send non-blocking prompt-injection near-miss hits as Community IQ telemetry to a separate heuristics endpoint (`/v2/heuristic`), gated on `community_iq`. PI risk thresholds are now fixed constants instead of `pi_check` config.
+
+- Bump the model schema tag to `v2` so installs pick up the retrained prompt-injection classifier (`pi-model` 1.0.3). Clients on `v1` keep their existing model.
+
+### Patch Changes
+
+- Deploy versioned default configuration metadata to `~/.sage/config.defaults.json` so external tools can discover defaults while multiple installed Sage versions avoid overwriting newer defaults.
+
 ## 0.11.0
 
 ### Minor Changes
@@ -44,7 +62,7 @@
 
 - Honor `CLAUDE_CONFIG_DIR` environment variable when locating the Claude Code config directory. Previously all references to plugin registries, settings files, and marketplace config were hardcoded to `~/.claude`. Now they route through a central `getClaudeConfigDir()` helper that reads `CLAUDE_CONFIG_DIR` first and falls back to `~/.claude`.
 
-- Address agentic review findings: engine cleanup, directory rename, and correctness fixes.
+- Engine cleanup, directory rename, and correctness fixes.
   **Engine cleanup**
 
   - Remove dead `decision` field from internal `Signal` interface; per-signal `applyPolicy` calls were computed and stored but never read — the final decision is derived once from `max(confidences)`.
@@ -59,16 +77,16 @@
   - `custom_allowlist_path` detection: fix false negative where a non-default `trustedDomainsDir` was not recognised as the custom-path variant.
   - Threat loader: validate `confidence` at load time (reject rules with values outside `[0,1]`); fix OpenClaw plugin migration race on concurrent session starts.
   - Heuristic pre-filter: clarify in comments and docs that skipping allow results is semantically safe (allow heuristics never fire on allow-path inputs).
-    **PR review follow-up**
+    **Additional correctness fixes**
   - `applyPolicy` now fails open on out-of-range confidence: logs a warning and returns `allow` instead of throwing `RangeError`. Unifies behavior with `threat-loader.ts` (which already log+skips invalid YAML rules) and preserves the audit trail when a future signal source feeds bad data.
   - Package cache replay: when cached `packageVerdict`/`packageConfidence` are invalid, the entry is treated as a cache miss and re-queried live instead of synthesizing a fallback verdict. Cache entries are version-scoped, so legacy entries written before these fields existed are evicted on version bump.
-  - Docs: scrub legacy vendor reference from `decision-pipeline.md` and `plugin-scanner.ts` jsdoc; reword "threat author" → "threat rule author".
+  - Docs: terminology consistency pass on `decision-pipeline.md` and `plugin-scanner.ts` jsdoc; reword "threat author" → "threat rule author".
 
 - Retry atomic JSON file renames on Windows when transient sharing violations briefly block replacement. This avoids fail-open cache and metadata write errors caused by antivirus, indexers, or sync clients holding short-lived file handles.
 
 - Report the host agent version (Claude Code, Cursor, VS Code) correctly.
 
-- Section 5 quick fixes: MCP false-positive tools for OpenCode/OpenClaw, dead code removal, and docs cleanup.
+- MCP false-positive tools for OpenCode/OpenClaw, dead code removal, and docs cleanup.
   **MCP false-positive tools on OpenCode and OpenClaw**
   - OpenCode: plugin now auto-registers the Sage MCP server via a `config` hook (before MCP init). `sage_report_false_positive` and `sage_list_audit_entries` are available without any user configuration.
   - OpenClaw: ships a bundled `dist/mcp-server.cjs`; users add it to `mcp.servers` config manually (one-time step; documented in user-guide).

@@ -1,19 +1,15 @@
 /**
- * Community IQ detection telemetry.
- * Sends an awaited JSON POST to /v2/detection on qualifying deny paths.
- * Payload uses the same schema shape as FP reports but is populated
- * independently from live detection context.
+ * Community IQ telemetry. POSTs a JSON event to /v2/detection for blocking
+ * denies, or to /v2/heuristic for non-blocking hits.
  *
- * The structured `content` snapshot is built once by the evaluator (via
- * `buildContentSnapshot` in `content-snapshot.ts`) and threaded into both
- * `logVerdict` and this function. This module deliberately does not import
- * the snapshot builder — it sends `args.content` verbatim.
+ * The `content` snapshot is built by the evaluator (`buildContentSnapshot`)
+ * and passed in verbatim; this module does not build it.
  */
 
 import { resolveEndpoint } from "./clients/url-check.js";
 import { loadExtendedInfo, mergeExtendedInfo } from "./extended-info.js";
 import { getInstallationId } from "./installation-id.js";
-import { buildSageProxyEnvelope } from "./sage-proxy.js";
+import { buildSageProxyEnvelope, type SageUserConfigInput } from "./sage-proxy.js";
 import type { CanonicalToolType } from "./tool-names.js";
 import type { AgentRuntime, AuditSignals, HookType, Logger } from "./types.js";
 import { nullLogger } from "./types.js";
@@ -37,7 +33,7 @@ function resolveTimeoutMs(): number {
 
 // ── Detection payload & sender ─────────────────────────────────────
 
-export interface DetectionTelemetryArgs {
+export interface CommunityIqTelemetryArgs {
 	eventId: string;
 	agentRuntime: AgentRuntime | string | undefined;
 	agentRuntimeVersion?: string;
@@ -52,18 +48,24 @@ export interface DetectionTelemetryArgs {
 	content?: Record<string, unknown>;
 	signals?: AuditSignals;
 	communityIqEnabled: boolean;
+	config?: SageUserConfigInput;
+	/**
+	 * Whether Sage blocked the action. Blocking events go to /v2/detection;
+	 * non-blocking hits go to /v2/heuristic. Defaults to `true` (blocking).
+	 */
+	blocking?: boolean;
 	logger?: Logger;
 }
 
 /**
- * Send Community IQ detection telemetry for a qualifying deny verdict.
- * Sends an awaited POST with a capped timeout. Never throws.
+ * Send Community IQ telemetry. Sends an awaited POST with a capped timeout.
+ * Never throws.
  */
-export async function sendCommunityIqDetection(args: DetectionTelemetryArgs): Promise<void> {
+export async function sendCommunityIqTelemetry(args: CommunityIqTelemetryArgs): Promise<void> {
 	const logger = args.logger ?? nullLogger;
 
 	if (!args.communityIqEnabled) {
-		logger.debug("Community IQ disabled, skipping detection telemetry");
+		logger.debug("Community IQ disabled, skipping telemetry");
 		return;
 	}
 
@@ -74,7 +76,7 @@ export async function sendCommunityIqDetection(args: DetectionTelemetryArgs): Pr
 		// fail-open
 	}
 	if (!iid) {
-		logger.debug("Skipping detection telemetry: missing installation id");
+		logger.debug("Skipping telemetry: missing installation id");
 		return;
 	}
 
@@ -84,7 +86,11 @@ export async function sendCommunityIqDetection(args: DetectionTelemetryArgs): Pr
 		agentRuntime: args.agentRuntime ?? "unknown",
 		agentRuntimeVersion:
 			args.agentRuntimeVersion ?? process.env.SAGE_AGENT_RUNTIME_VERSION ?? "unknown",
+		config: args.config,
 	});
+
+	// Default to a blocking event; non-blocking hits pass `blocking: false`.
+	const blocking = args.blocking ?? true;
 
 	const payload = {
 		...envelope,
@@ -94,8 +100,8 @@ export async function sendCommunityIqDetection(args: DetectionTelemetryArgs): Pr
 			// canonicalize before calling `evaluateToolCall`, so no further
 			// mapping is needed here.
 			tool_type: args.toolName,
-			verdict: "deny",
-			user_action: "blocked",
+			verdict: blocking ? "deny" : "suspicious",
+			...(blocking ? { user_action: "blocked" } : {}),
 			timestamp: new Date().toISOString(),
 			...(args.signals && Object.keys(args.signals).length > 0 ? { signals: args.signals } : {}),
 			content: args.content ?? {},
@@ -111,8 +117,10 @@ export async function sendCommunityIqDetection(args: DetectionTelemetryArgs): Pr
 
 	const timeoutMs = resolveTimeoutMs();
 
+	const endpoint = blocking ? "/v2/detection" : "/v2/heuristic";
+
 	try {
-		const response = await fetch(resolveEndpoint("/v2/detection"), {
+		const response = await fetch(resolveEndpoint(endpoint), {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify(enriched),
@@ -120,12 +128,12 @@ export async function sendCommunityIqDetection(args: DetectionTelemetryArgs): Pr
 		});
 
 		if (!response.ok) {
-			logger.warn("Detection telemetry send failed", {
+			logger.warn("Community IQ telemetry send failed", {
 				eventId: args.eventId,
 				status: response.status,
 			});
 		} else {
-			logger.debug("Detection telemetry sent", {
+			logger.debug("Community IQ telemetry sent", {
 				eventId: args.eventId,
 				toolName: args.toolName,
 				hookType: args.hookType ?? "PreToolUse",

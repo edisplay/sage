@@ -23,15 +23,10 @@ const REQUEST_HEADERS = [
 	{ name: "User-Agent", value: SERVICE_NAME },
 ];
 
-export type SkillRiskLevel = "SAFE" | "LOW" | "MEDIUM" | "HIGH" | "CRITICAL" | string;
-
 export interface SkillCheckResult {
 	skillId: string;
 	verdict?: string;
-	overallRiskLevel?: SkillRiskLevel;
 	summary?: string;
-	recommendations: string[];
-	threatCategories: string[];
 }
 
 export interface SkillCheckClientConfig {
@@ -53,9 +48,13 @@ export class SkillCheckClient {
 	/**
 	 * Check a list of skill IDs against the proxy.
 	 *
-	 * Returns a Map keyed by skill id. A `null` value means the proxy had
-	 * no opinion on that skill (analogous to a clean verdict). Skill ids
-	 * not found in the response are simply absent from the map.
+	 * Returns a Map keyed by skill id:
+	 * - `null` — proxy had no opinion (explicit null in response, or skill absent
+	 *   from an otherwise-successful response). Callers should treat this as
+	 *   "unknown, queue for upload".
+	 * - absent — the entire batch failed (HTTP error or network error). Callers
+	 *   should fail open and skip the skill rather than enqueue it.
+	 * - object — a verdict from the analyzer.
 	 *
 	 * Fails-open: on any error returns an empty Map. Per-batch errors do
 	 * not poison results from successful batches.
@@ -106,7 +105,12 @@ export class SkillCheckClient {
 			const data = (await response.json()) as Record<string, unknown>;
 			const results = (data.results ?? {}) as Record<string, unknown>;
 			for (const id of skillIds) {
-				if (!(id in results)) continue;
+				if (!(id in results)) {
+					// Server responded OK but omitted this id — treat as "no opinion",
+					// same as an explicit null, so callers can distinguish from an error.
+					out.set(id, null);
+					continue;
+				}
 				const raw = results[id];
 				if (raw === null || raw === undefined) {
 					out.set(id, null);
@@ -123,19 +127,10 @@ export class SkillCheckClient {
 	}
 
 	private parseResult(skillId: string, raw: Record<string, unknown>): SkillCheckResult {
-		const recommendationsRaw = (raw.recommendations ?? []) as unknown[];
-		const recommendations = recommendationsRaw.filter((r): r is string => typeof r === "string");
-		const categoriesRaw = (raw.threat_categories ?? []) as unknown[];
-		const threatCategories = categoriesRaw.filter((c): c is string => typeof c === "string");
-
 		return {
 			skillId,
 			verdict: typeof raw.verdict === "string" ? raw.verdict : undefined,
-			overallRiskLevel:
-				typeof raw.overall_risk_level === "string" ? raw.overall_risk_level : undefined,
 			summary: typeof raw.summary === "string" ? raw.summary : undefined,
-			recommendations,
-			threatCategories,
 		};
 	}
 }

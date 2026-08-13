@@ -5,6 +5,8 @@ import {
 	type Branding,
 	type Config,
 	ConfigSchema,
+	captureEnabled,
+	captureHookInput,
 	defaultBranding,
 	isAmsiSupported,
 	type Logger,
@@ -361,6 +363,7 @@ export function registerClaudeHookTools(
 			let branding: Branding = defaultBranding;
 			try {
 				const hookInput = normalizeClaudeHookInput(args);
+				if (captureEnabled()) await captureHookInput("PreToolUse", args, hookInput);
 				logNormalizationDiagnostics(logger, "PreToolUse", args, hookInput);
 				const runtime = await loadCachedRuntime();
 				branding = runtime.branding;
@@ -413,6 +416,7 @@ export function registerClaudeHookTools(
 		async (args) => {
 			try {
 				const hookInput = normalizeClaudeHookInput(args);
+				if (captureEnabled()) await captureHookInput("PostToolUse", args, hookInput);
 				logNormalizationDiagnostics(logger, "PostToolUse", args, hookInput);
 				const { config, branding } = await loadCachedRuntime();
 				logger.debug("PostToolUse hook started", {

@@ -22,6 +22,11 @@ await Promise.all([
 		entryPoints: ["../core/src/model-download-worker.ts"],
 		outfile: "dist/model-download-worker.cjs",
 	}),
+	esbuild.build({
+		...shared,
+		entryPoints: ["../core/src/skill-upload-worker.ts"],
+		outfile: "dist/skill-upload-worker.cjs",
+	}),
 ]);
 
 console.log("Build complete.");

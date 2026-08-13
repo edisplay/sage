@@ -579,6 +579,7 @@ export function registerFalsePositiveTools(
 								versionApp,
 								agentRuntime: agent_runtime,
 								agentRuntimeVersion: runtimeVersion,
+								config,
 							}),
 							block_event: {
 								hook_type,

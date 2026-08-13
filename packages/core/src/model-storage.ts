@@ -20,13 +20,15 @@ import { join, resolve } from "node:path";
 import { resolvePath } from "./config.js";
 
 /**
- * Bumped only when a Sage release ships a model change that breaks
- * back-compat with previously-downloaded files (different ONNX op set,
- * new tokenizer vocab, replacement model entirely, additional model
- * added that must be present together, etc.). Most patch and minor
- * releases will not touch this constant.
+ * Bumped when a Sage release ships a model change that previously-installed
+ * clients must not keep (different ONNX op set, new tokenizer vocab,
+ * replacement weights, additional model added that must be present
+ * together, etc.). Because an already-present model short-circuits the
+ * manifest fetch entirely, this constant is the only lever that moves an
+ * existing install onto a new model. Most patch and minor releases will
+ * not touch it.
  */
-export const MODEL_SCHEMA_VERSION = "v1";
+export const MODEL_SCHEMA_VERSION = "v2";
 
 /**
  * Per-schema list of models that must be on disk for `pi_check.enabled`
@@ -36,6 +38,7 @@ export const MODEL_SCHEMA_VERSION = "v1";
  */
 export const REQUIRED_MODELS_BY_SCHEMA: Record<string, readonly string[]> = {
 	v1: ["pi-model"],
+	v2: ["pi-model"],
 };
 
 /**

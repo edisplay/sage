@@ -8,6 +8,8 @@ import {
 	BundledPiProvider,
 	type CanonicalToolType,
 	canonicalizeToolName,
+	captureEnabled,
+	captureHookInput,
 	createOperationalLogger,
 	evaluateToolCall,
 	evaluateToolOutput,
@@ -46,11 +48,14 @@ const HOST_AGENT_RUNTIME_VERSION = process.env.SAGE_APP_ROOT
 
 // ── Platform-specific tool name maps ──────────────────────────────
 
-const CURSOR_TOOL_MAP: Record<string, CanonicalToolType> = {
+// Exported so the tool-name drift contract (tool-names-contract.test.ts) can pin
+// these maps against a committed snapshot — the maps are Sage's tool-name
+// dependency surface for these hosts (see docs/developer-guide.md — E2E architecture, tool-name drift).
+export const CURSOR_TOOL_MAP: Record<string, CanonicalToolType> = {
 	Shell: "Bash",
 };
 
-const VSCODE_TOOL_MAP: Record<string, CanonicalToolType> = {
+export const VSCODE_TOOL_MAP: Record<string, CanonicalToolType> = {
 	run_in_terminal: "Bash",
 	bash: "Bash",
 	write_bash: "Bash",
@@ -66,6 +71,17 @@ const VSCODE_TOOL_MAP: Record<string, CanonicalToolType> = {
 	grep: "Grep",
 	fetch_webpage: "WebFetch",
 	web_fetch: "WebFetch",
+	// Copilot CLI 1.0.63+ renamed its tool names to PascalCase (was lowercase
+	// bash/create/edit/view/grep/web_fetch in earlier releases) and changed some
+	// input fields (Write: file_text, Edit: old_str/new_str, Grep: paths). These
+	// equal Sage's canonical type names, but artifact extraction is keyed off the
+	// raw name, so they must be mapped/handled explicitly or Sage extracts nothing.
+	Bash: "Bash",
+	Write: "Write",
+	Read: "Read",
+	Edit: "Edit",
+	Grep: "Grep",
+	WebFetch: "WebFetch",
 };
 
 type CursorEventName =
@@ -144,6 +160,12 @@ async function handleCursor(payload: unknown, branding: Branding, logger: Logger
 	}
 
 	const normalized = normalizeCursorCall(payload, eventName);
+	// E2E drift loop (Layer 2): capture the raw wire payload + its normalized form
+	// so the host test can diff against the committed contract fixture. Inert unless
+	// SAGE_E2E_CAPTURE_DIR is set (never in production); namespaced so connectors
+	// sharing one capture dir don't collide. Fail-open.
+	if (captureEnabled())
+		await captureHookInput("PreToolUse", payload, normalized, { filePrefix: "cursor-" });
 	if (!normalized) {
 		logger.warn("Could not normalize Cursor hook payload", { eventName });
 		writeJson(
@@ -159,7 +181,7 @@ async function handleCursor(payload: unknown, branding: Branding, logger: Logger
 
 	try {
 		const verdict = await evaluateNormalizedCall(normalized, logger);
-		writeJson(toCursorResponse(verdict, branding));
+		writeJson(toCursorResponse(eventName, verdict, branding));
 		await completeHook("evaluated", {
 			eventName,
 			toolName: normalized.toolName,
@@ -198,6 +220,12 @@ async function handleVsCode(payload: unknown, branding: Branding, logger: Logger
 	};
 	logger.debug("VS Code hook started", { agentRuntime: "vscode" });
 	const normalized = normalizeVsCodeCall(payload);
+	// E2E drift loop (Layer 2): capture the raw wire payload + its normalized form
+	// so the host test can diff against the committed contract fixture. Inert unless
+	// SAGE_E2E_CAPTURE_DIR is set (never in production); namespaced so connectors
+	// sharing one capture dir don't collide. Fail-open.
+	if (captureEnabled())
+		await captureHookInput("PreToolUse", payload, normalized, { filePrefix: "vscode-" });
 	if (!normalized) {
 		writeJson({});
 		await completeHook("skipped", { skippedReason: "invalid_payload" });
@@ -416,33 +444,42 @@ function extractFromVsCodeTool(toolName: string, toolInput: Record<string, unkno
 	switch (toolName) {
 		// --- Terminal / shell ---
 		case "run_in_terminal": // VS Code: CoreRunInTerminal — {command, explanation, goal}
-		case "bash": // Copilot CLI — {command, description}
+		case "bash": // Copilot CLI (≤1.0.x) — {command, description}
 		case "write_bash": // Copilot CLI — {shellId, input, delay}
+		case "Bash": // Copilot CLI 1.0.63 — {command, description}
 			return extractFromBash(asString(toolInput.command) ?? "");
 
 		// --- File create ---
 		case "create_file": // VS Code: CreateFile — {filePath, content}
-		case "create": // Copilot CLI — {path, content}
+		case "create": // Copilot CLI (≤1.0.x) — {path, content}
+		case "Write": // Copilot CLI 1.0.63 — {path, file_text}
 			return extractFromWrite(toolInput);
 
 		// --- File edit ---
 		case "replace_string_in_file": // VS Code: ReplaceString — {filePath, oldString, newString}
 		case "insert_edit_into_file": // VS Code: EditFile — {filePath, code}
-		case "edit": // Copilot CLI — {path, old_string, new_string}
+		case "edit": // Copilot CLI (≤1.0.x) — {path, old_string, new_string}
+		case "Edit": // Copilot CLI 1.0.63 — {path, old_str, new_str}
 			return extractFromEdit(toolInput);
 		case "multi_replace_string_in_file": // VS Code: MultiReplaceString — {replacements: [{filePath, oldString, newString}]}
 			return extractFromMultiReplace(toolInput);
 
 		// --- File read ---
 		case "read_file": // VS Code: ReadFile — {filePath}
-		case "view": // Copilot CLI — {path}
-		case "grep": // Copilot CLI — {pattern, path}
+		case "view": // Copilot CLI (≤1.0.x) — {path}
+		case "Read": // Copilot CLI 1.0.63 — {path}
 			return extractFromRead(toolInput);
+
+		// --- File search (path is a read target) ---
+		case "grep": // Copilot CLI (≤1.0.x) — {pattern, path}
+		case "Grep": // Copilot CLI 1.0.63 — {pattern, paths}
+			return extractFromGrep(toolInput);
 
 		// --- URL fetch ---
 		case "fetch_webpage": // VS Code: FetchWebPage — {urls: [], query}
 			return extractFromFetchWebpage(toolInput);
-		case "web_fetch": // Copilot CLI — {url}
+		case "web_fetch": // Copilot CLI (≤1.0.x) — {url}
+		case "WebFetch": // Copilot CLI 1.0.63 — {url}
 			return extractFromWebFetch(toolInput);
 
 		// --- Patch ---
@@ -452,6 +489,25 @@ function extractFromVsCodeTool(toolName: string, toolInput: Record<string, unkno
 		default:
 			return [];
 	}
+}
+
+/**
+ * Grep targets a single path (VS Code / Copilot ≤1.0.x `grep` → {path}, normalized to
+ * file_path) or an array of them (Copilot CLI 1.0.63 `Grep` → {paths}). extractFromRead
+ * only reads the single file_path, so handle the `paths` array explicitly — otherwise a
+ * Grep carrying only `paths` yields no artifacts and a sensitive-path grep falls open to
+ * allow (the no-artifacts short-circuit).
+ */
+function extractFromGrep(toolInput: Record<string, unknown>): Artifact[] {
+	const artifacts = extractFromRead(toolInput);
+	if (Array.isArray(toolInput.paths)) {
+		for (const p of toolInput.paths) {
+			if (typeof p === "string" && p) {
+				artifacts.push(...extractFromRead({ file_path: p }));
+			}
+		}
+	}
+	return artifacts;
 }
 
 /** VS Code fetch_webpage sends `urls` (array) instead of single `url`. */
@@ -548,7 +604,11 @@ function extractFromCursorTool(toolName: string, toolInput: Record<string, unkno
 
 function normalizeWriteLikeInput(toolInput: Record<string, unknown>): Record<string, unknown> {
 	const filePath = readFilePath(toolInput);
-	const content = asString(toolInput.content) ?? asString(toolInput.new_string) ?? "";
+	const content =
+		asString(toolInput.content) ??
+		asString(toolInput.new_string) ??
+		asString(toolInput.file_text) ?? // Copilot CLI 1.0.63 Write
+		"";
 	return {
 		...toolInput,
 		file_path: filePath ?? "",
@@ -560,6 +620,7 @@ function normalizeEditLikeInput(toolInput: Record<string, unknown>): Record<stri
 	const filePath = readFilePath(toolInput);
 	const newString =
 		asString(toolInput.new_string) ??
+		asString(toolInput.new_str) ?? // Copilot CLI 1.0.63 Edit
 		asString(toolInput.newString) ??
 		asString(toolInput.code) ?? // VS Code insert_edit_into_file
 		asString(toolInput.streamContent) ??
@@ -591,23 +652,34 @@ function normalizeVsCodeToolInput(
 		case "run_in_terminal":
 		case "bash":
 		case "write_bash":
+		case "Bash": // Copilot CLI 1.0.63
 			return {
 				...toolInput,
 				command: asString(toolInput.command) ?? asString(toolInput.input) ?? "",
 			};
 		case "create_file":
 		case "create":
+		case "Write": // Copilot CLI 1.0.63
 			return normalizeWriteLikeInput(toolInput);
 		case "replace_string_in_file":
 		case "insert_edit_into_file":
 		case "edit":
+		case "Edit": // Copilot CLI 1.0.63
 			return normalizeEditLikeInput(toolInput);
 		case "multi_replace_string_in_file":
 			return normalizeMultiReplaceTopLevel(toolInput);
 		case "read_file":
 		case "view":
-		case "grep":
-			return { ...toolInput, file_path: readFilePath(toolInput) ?? "" };
+		case "grep": // Copilot CLI (≤1.0.x) — {pattern, path}
+		case "Read": // Copilot CLI 1.0.63
+		case "Grep": // Copilot CLI 1.0.63 — {pattern, paths}
+			// `paths` (1.0.63 Grep) is an array readFilePath can't read; fall back to its
+			// first entry so the audit summary names a real target (extraction handles the
+			// full array via extractFromGrep).
+			return {
+				...toolInput,
+				file_path: readFilePath(toolInput) ?? firstPath(toolInput.paths) ?? "",
+			};
 		default:
 			return toolInput;
 	}
@@ -707,21 +779,50 @@ function readFilePath(toolInput: Record<string, unknown>): string | undefined {
 	);
 }
 
-function toCursorResponse(verdict: Verdict, branding: Branding): Record<string, unknown> {
+/** First non-empty string in a `paths` array (Copilot CLI 1.0.63 Grep), else undefined. */
+function firstPath(paths: unknown): string | undefined {
+	if (!Array.isArray(paths)) return undefined;
+	return paths.find((p): p is string => typeof p === "string" && p.length > 0);
+}
+
+function toCursorResponse(
+	eventName: CursorEventName,
+	verdict: Verdict,
+	branding: Branding,
+): Record<string, unknown> {
 	if (verdict.decision === "allow") {
 		return { decision: "allow", permission: "allow" };
 	}
 
 	const reason = truncateReason(verdict, branding);
-	const agentMessage = `${branding.name} ${verdict.decision === "deny" ? "blocked" : "flagged"} this action (${verdict.severity}).`;
+	const permission = toCursorPermission(eventName, verdict.decision);
+	const agentMessage = `${branding.name} ${permission === "deny" ? "blocked" : "flagged"} this action (${verdict.severity}).`;
 
 	return {
-		decision: verdict.decision === "ask" ? "ask" : "deny",
-		permission: verdict.decision === "ask" ? "ask" : "deny",
+		decision: permission,
+		permission,
 		reason,
 		user_message: reason,
 		agent_message: agentMessage,
 	};
+}
+
+export function toCursorPermission(
+	eventName: CursorEventName,
+	decision: Verdict["decision"],
+): "allow" | "deny" | "ask" {
+	if (decision !== "ask") {
+		return decision;
+	}
+
+	// preToolUse accepts "ask" but does not enforce it, beforeReadFile only supports "allow" | "deny".
+	// https://cursor.com/docs/hooks#pretooluse
+	// https://cursor.com/docs/hooks#beforereadfile
+	if (eventName === "preToolUse" || eventName === "beforeReadFile") {
+		return "deny";
+	}
+
+	return decision;
 }
 
 function toVsCodeResponse(verdict: Verdict, branding: Branding): Record<string, unknown> {
@@ -802,7 +903,7 @@ async function handlePostToolUse(
 			config.sensitivity !== "relaxed"
 		) {
 			try {
-				const piWarning = await findPiWarningInAuditLog(config.logging, toolUseId, config.pi_check);
+				const piWarning = await findPiWarningInAuditLog(config.logging, toolUseId);
 				if (piWarning) {
 					parts.push(`🛡️ ${formatPiWarning(piWarning, branding)}`);
 				}

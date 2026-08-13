@@ -43,12 +43,19 @@ export type { PiCheckProvider } from "./clients/pi-check.js";
 // PI (prompt-injection) check client
 export { BundledPiProvider, StubPiProvider } from "./clients/pi-check.js";
 export { ensurePiDeps } from "./clients/pi-deps-installer.js";
+// Skill Analyzer upload client (Phase 2 — uploads unknown skill content)
+export {
+	SkillAnalyzeClient,
+	type SkillAnalyzeClientConfig,
+	type SkillAnalyzeMetadata,
+	type SkillAnalyzeResult,
+	type SkillAnalyzeVerdict,
+} from "./clients/skill-analyze.js";
 // Skill check client
 export {
 	SkillCheckClient,
 	type SkillCheckClientConfig,
 	type SkillCheckResult,
-	type SkillRiskLevel,
 } from "./clients/skill-check.js";
 // URL check client
 export { resolveEndpoint, UrlCheckClient } from "./clients/url-check.js";
@@ -61,6 +68,14 @@ export {
 	resolvePath,
 	SAGE_DIR,
 } from "./config.js";
+export {
+	buildConfigDefaults,
+	CONFIG_DEFAULTS_FILENAME,
+	CONFIG_DEFAULTS_SCHEMA_VERSION,
+	type ConfigDefaults,
+	deployConfigDefaults,
+	serializeConfigDefaults,
+} from "./config-defaults.js";
 // Config diagnostics
 export {
 	type ConfigurationWarning,
@@ -83,9 +98,19 @@ export {
 } from "./content-snapshot.js";
 // Detection telemetry (Community IQ)
 export {
-	type DetectionTelemetryArgs,
-	sendCommunityIqDetection,
+	type CommunityIqTelemetryArgs,
+	sendCommunityIqTelemetry,
 } from "./detection-telemetry.js";
+// E2E hook-payload capture sink (Layer 2 drift loop; inert unless SAGE_E2E_CAPTURE_DIR is set).
+// Runtime code (imported by the connector hooks, gated by env), so it lives on the
+// main entry. The envelope-diff helpers it pairs with are test-only and live on the
+// "@gendigital/sage-core/testing" subpath so they never reach a production bundle.
+export {
+	type CaptureOptions,
+	captureEnabled,
+	captureHookInput,
+	type HookCaptureEvent,
+} from "./e2e-capture.js";
 // Decision engine
 export { DecisionEngine } from "./engine.js";
 // Runtime evaluator
@@ -146,6 +171,7 @@ export {
 	atomicWriteJson,
 	getFileContent,
 	getFileContentSync,
+	getHomeDir,
 	pruneOrphanedTmpFiles,
 } from "./file-utils.js";
 // Format (shared alert formatting)
@@ -172,8 +198,25 @@ export {
 } from "./guard.js";
 // Heuristics
 export { HeuristicsEngine } from "./heuristics.js";
+// Install rollout state (skill-upload consent transition)
+export {
+	type DecideRolloutOptions,
+	decideSkillUploadRollout,
+	INSTALL_STATE_SCHEMA_VERSION,
+	type InstallState,
+	loadInstallState,
+	type NoticeRecord,
+	type RolloutDecision,
+	resetSkillUploadRolloutForTest,
+	resolveSkillUploadRollout,
+	type SkillUploadRollout,
+	saveInstallState,
+	takePendingNotices,
+} from "./install-state.js";
 // Installation ID
 export { getInstallationId } from "./installation-id.js";
+// Shared JSONL log writer (append + rotation)
+export { appendJsonlEntry, type JsonlLogConfig } from "./jsonl-log-writer.js";
 // Background model download orchestration
 export {
 	type EnsureModelsAvailableArgs,
@@ -191,6 +234,14 @@ export {
 	REQUIRED_MODELS_BY_SCHEMA,
 	requiredModelFiles,
 } from "./model-storage.js";
+// Session-start notices (id + message registry)
+export {
+	formatNotice,
+	formatNoticeById,
+	NOTICES,
+	type NoticeDefinition,
+	SKILL_UPLOAD_NOTICE,
+} from "./notices.js";
 // Operational logging
 export {
 	createOperationalLogger,
@@ -220,10 +271,13 @@ export { readProductJsonVersion } from "./product-version.js";
 // Sage Proxy (shared envelope / env)
 export {
 	buildSageProxyEnvelope,
-	mapSageProxyArchitecture,
-	mapSageProxyOs,
+	buildSageUserConfig,
+	mapSageHostArchitecture,
+	mapSageHostOs,
+	type SageHostOs,
 	type SageProxyEnvelope,
-	type SageProxyOs,
+	type SageUserConfig,
+	type SageUserConfigInput,
 } from "./sage-proxy.js";
 // Scan handler
 export { createScanHandler, runPluginScan, type ScanHandlerOptions } from "./scan-handler.js";
@@ -233,7 +287,9 @@ export {
 	type SessionStartContext,
 	type SessionStartResult,
 	type SpawnModelDownloadWorkerArgs,
+	type SpawnSkillUploadWorkerArgs,
 	spawnModelDownloadWorker,
+	spawnSkillUploadWorker,
 } from "./session-start.js";
 // Session start scan pipeline
 export {
@@ -247,18 +303,57 @@ export {
 export {
 	computeSkillId,
 	computeSkillIdsForRoot,
+	dedupeSkillsByResolvedPath,
+	discoverLooseSkills,
+	discoverLooseSkillsAcrossRoots,
 	entriesFromDirectory,
-	findSkillPackages,
+	findSkillPackagesWithMtime,
+	looseSkillKey,
 	type SkillArchiveEntry,
 	type SkillIdResult,
+	type SkillPackage,
+	type SkillRoot,
+	type SkillScope,
 } from "./skill-id.js";
+// Pending marker for skills queued to the upload worker (dedup across sessions)
+export {
+	addPending,
+	isPending,
+	listPending,
+	loadPendingMarker,
+	type PendingMarker,
+	removePending,
+	type SkillPendingEntry,
+	type SkillPendingOrigin,
+	savePendingMarker,
+} from "./skill-pending.js";
+// NOTE: skill-upload-worker.js is intentionally NOT re-exported here. It pulls in
+// the fflate ZIP library, and re-exporting it dragged ~20 KB of ZIP code into
+// every bundle that imports this barrel (session-start, mcp-server, statusline)
+// even though only the detached upload worker needs it. The worker is built from
+// its own entry point (esbuild) and tests import it directly from the module.
+// Persistent Skill Analyzer verdict cache (keyed by content-addressed skill id)
+export {
+	type CachedSkillVerdict,
+	getVerdict,
+	loadSkillVerdictCache,
+	loadSkillVerdictCacheSync,
+	putVerdict,
+	riskyVerdictsSince,
+	type SkillVerdictCache,
+	type SkillVerdictSource,
+	saveSkillVerdictCache,
+} from "./skill-verdict-cache.js";
 // Session status (detection notifications)
 export {
+	agentRuntimeLabel,
+	foreignSourceRuntime,
 	formatStatusLine,
 	initSessionStatus,
 	pruneSessionStatusFiles,
 	readSessionStatus,
 	type SessionStatus,
+	type SkillWarning,
 	sanitizeSessionId,
 	updateSessionStatus,
 } from "./statusline.js";

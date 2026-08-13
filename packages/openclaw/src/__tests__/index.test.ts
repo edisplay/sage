@@ -16,9 +16,11 @@ vi.mock("@gendigital/sage-core", () => ({
 	})),
 	formatAllowlistMigrationWarning: vi.fn(() => "allowlist migration warning"),
 	formatConfigurationWarnings: vi.fn(() => "config warnings"),
+	formatNoticeById: vi.fn(() => ""),
 	getConfigurationWarningsSync: vi.fn(() => []),
 	loadConfigSync: vi.fn(() => ({})),
 	resolveBranding: vi.fn(() => ({ name: "Sage" })),
+	takePendingNotices: vi.fn(() => Promise.resolve([])),
 }));
 
 vi.mock("../bundled-dirs.js", () => ({
@@ -30,12 +32,13 @@ vi.mock("../bundled-dirs.js", () => ({
 
 vi.mock("../startup-scan.js", () => ({
 	createBeforeAgentStartHandler: vi.fn(
-		(getFindings: () => string | null, clearFindings: () => void) => () => {
-			const findings = getFindings();
-			if (!findings) return undefined;
-			clearFindings();
-			return { prependContext: findings };
-		},
+		(getSecurityFindings: () => string | null, clearFindings: () => void) =>
+			(notices: string | null) => {
+				const findings = getSecurityFindings();
+				if (!notices && !findings) return undefined;
+				if (findings) clearFindings();
+				return { prependContext: [notices, findings].filter(Boolean).join("\n\n") };
+			},
 	),
 	createSessionScanHandler: vi.fn(
 		(_logger: unknown, _branding: unknown, onResult?: (msg: string) => void) => () => {

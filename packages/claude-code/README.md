@@ -39,7 +39,7 @@ See the [install guide](https://ai.gendigital.com/sage#install-claude-code) for 
 
 Sage loads automatically on every session — no configuration needed.
 
-> To verify it's working, ask Claude to run `echo __sage_test_deny_cmd_a75bf229__`. Sage should block this harmless canary command.
+> To verify it's working, ask Claude to run `echo diagmark_cmd_a75bf229`. Sage should block this harmless canary command.
 
 ## What Sage intercepts
 

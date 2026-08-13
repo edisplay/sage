@@ -33,7 +33,7 @@ Sage is a security layer for AI coding assistants. It intercepts tool calls — 
 1. Install the extension from the marketplace — see the install guide for [Cursor](https://ai.gendigital.com/sage#install-cursor) or [VS Code](https://ai.gendigital.com/sage#install-vscode)
 2. Sage auto-enables protection on startup — no configuration needed
 
-> To verify it's working, ask your agent to run `echo __sage_test_deny_cmd_a75bf229__`. Sage should block this harmless canary command.
+> To verify it's working, ask your agent to run `echo diagmark_cmd_a75bf229`. Sage should block this harmless canary command.
 
 ## What Sage intercepts
 

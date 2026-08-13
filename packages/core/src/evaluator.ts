@@ -23,7 +23,7 @@ import {
 	safeTruncate,
 	scrubHomePath,
 } from "./content-snapshot.js";
-import { sendCommunityIqDetection } from "./detection-telemetry.js";
+import { sendCommunityIqTelemetry } from "./detection-telemetry.js";
 import { DecisionEngine } from "./engine.js";
 import { findAllowException, findDenyException, loadExceptions } from "./exceptions.js";
 import { HeuristicsEngine } from "./heuristics.js";
@@ -52,7 +52,13 @@ import type {
 	UrlCheckResult,
 	Verdict,
 } from "./types.js";
-import { ConfigSchema, nullLogger } from "./types.js";
+import {
+	ConfigSchema,
+	DEFAULT_PI_HIGH_RISK_THRESHOLD,
+	DEFAULT_PI_MEDIUM_RISK_THRESHOLD,
+	DEFAULT_PI_TELEMETRY_THRESHOLD,
+	nullLogger,
+} from "./types.js";
 import { VERSION } from "./version.js";
 
 export interface ToolEvaluationRequest {
@@ -457,8 +463,8 @@ export async function evaluateToolCall(
 			amsiCheckResults: amsiCheckResults.length > 0 ? amsiCheckResults : undefined,
 			piCheckResults: allPiResults,
 			piThresholds: {
-				highRisk: config.pi_check.high_risk_threshold,
-				mediumRisk: config.pi_check.medium_risk_threshold,
+				highRisk: DEFAULT_PI_HIGH_RISK_THRESHOLD,
+				mediumRisk: DEFAULT_PI_MEDIUM_RISK_THRESHOLD,
 			},
 		});
 	} else {
@@ -560,7 +566,7 @@ export async function evaluateToolCall(
 	}
 
 	if (allPiResults.length > 0) {
-		const piSnippetFloor = config.pi_check.medium_risk_threshold;
+		const piSnippetFloor = DEFAULT_PI_MEDIUM_RISK_THRESHOLD;
 		auditSignals.pi_checks = allPiResults.map((r) => ({
 			risk: r.risk,
 			model_id: r.modelId,
@@ -614,9 +620,11 @@ export async function evaluateToolCall(
 		// Fail open.
 	}
 
-	if (verdict.decision === "deny") {
+	// Community IQ telemetry: a `deny` sends a blocking event; a PI score in the
+	// suspicious band [0.95, 0.99) on a non-deny verdict sends a non-blocking hit.
+	const submitTelemetry = async (blocking: boolean): Promise<void> => {
 		try {
-			await sendCommunityIqDetection({
+			await sendCommunityIqTelemetry({
 				eventId,
 				agentRuntime: request.agentRuntime,
 				agentRuntimeVersion: request.agentRuntimeVersion,
@@ -625,12 +633,24 @@ export async function evaluateToolCall(
 				content: resolvedContent,
 				signals: resolvedSignals,
 				communityIqEnabled: config.community_iq,
+				config,
+				blocking,
 				logger,
 			});
 		} catch (error) {
-			logger.debug("Detection telemetry failed open", { error: String(error) });
+			logger.debug("Community IQ telemetry failed open", { error: String(error) });
 			// Fail open — never block verdict delivery.
 		}
+	};
+
+	if (verdict.decision === "deny") {
+		await submitTelemetry(true);
+	} else if (
+		allPiResults.some(
+			(r) => r.risk >= DEFAULT_PI_TELEMETRY_THRESHOLD && r.risk < DEFAULT_PI_HIGH_RISK_THRESHOLD,
+		)
+	) {
+		await submitTelemetry(false);
 	}
 
 	if (verdict.decision !== "allow") {
@@ -643,9 +663,7 @@ export async function evaluateToolCall(
 	}
 
 	const piWarnings = allPiResults.filter(
-		(r) =>
-			r.risk >= config.pi_check.medium_risk_threshold &&
-			r.risk < config.pi_check.high_risk_threshold,
+		(r) => r.risk >= DEFAULT_PI_MEDIUM_RISK_THRESHOLD && r.risk < DEFAULT_PI_HIGH_RISK_THRESHOLD,
 	);
 	if (piWarnings.length > 0 && config.sensitivity !== "relaxed") verdict.piWarnings = piWarnings;
 
@@ -893,7 +911,7 @@ function createPiProvider(
 	return new BundledPiProvider({
 		modelPath: config.pi_check.model_path,
 		maxContentLength: config.pi_check.max_content_length,
-		mediumRiskThreshold: config.pi_check.medium_risk_threshold,
+		mediumRiskThreshold: DEFAULT_PI_MEDIUM_RISK_THRESHOLD,
 		logger,
 	});
 }
@@ -901,12 +919,13 @@ function createPiProvider(
 // ── PostToolUse output scanning ────────────────────────────────────
 
 export interface ToolOutputWarning {
-	source: "heuristic" | "pi";
+	source: "heuristic";
 	message: string;
 }
 
 /**
- * Scans tool output content for prompt injection using heuristic rules and ML model.
+ * Scans tool output content for prompt injection using heuristic rules only — the PI
+ * model runs on PreToolUse (`evaluateToolCall`), never on tool output.
  * Returns warning messages to inject as additionalContext (PostToolUse cannot block).
  */
 export async function evaluateToolOutput(
@@ -1020,7 +1039,7 @@ export async function evaluateToolOutput(
 		}
 
 		try {
-			await sendCommunityIqDetection({
+			await sendCommunityIqTelemetry({
 				eventId,
 				agentRuntime: request.agentRuntime,
 				agentRuntimeVersion: request.agentRuntimeVersion,
@@ -1029,10 +1048,13 @@ export async function evaluateToolOutput(
 				content: resolvedContent,
 				signals: resolvedSignals,
 				communityIqEnabled: config.community_iq,
+				config,
+				// PostToolUse heuristic matches are real detections the user is warned about.
+				blocking: true,
 				logger,
 			});
 		} catch (error) {
-			logger.debug("PostToolUse detection telemetry failed open", { error: String(error) });
+			logger.debug("PostToolUse Community IQ telemetry failed open", { error: String(error) });
 			// Fail open
 		}
 	}

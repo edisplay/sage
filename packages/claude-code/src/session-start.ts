@@ -16,6 +16,7 @@ import {
 	discoverPlugins,
 	formatAllowlistMigrationWarning,
 	formatConfigurationWarnings,
+	formatNoticeById,
 	getClaudeConfigDir,
 	getConfigurationWarnings,
 	initSessionStatus,
@@ -28,6 +29,7 @@ import {
 } from "@gendigital/sage-core";
 import { pruneStaleSessionFiles } from "./approval-tracker.js";
 import { STATUSLINE_MARKER } from "./constants.js";
+import { discoverClaudeCodeSkills } from "./personal-skills.js";
 import { resolveClaudeCodeVersion } from "./runtime-version.js";
 
 let logger: Logger = nullLogger;
@@ -51,13 +53,22 @@ function getPluginManifest(pluginRoot: string): { name: string | null; version: 
 	}
 }
 
-function getSessionId(): string {
+/**
+ * Read and parse the SessionStart hook input from stdin. fd 0 can only be
+ * consumed once, so both `session_id` and `cwd` are pulled from this single
+ * read. `cwd` falls back to the process working directory (Claude Code runs the
+ * hook from the project root) so project-skill discovery still has a root.
+ */
+function readHookInput(): { sessionId: string; cwd: string } {
 	try {
 		const input = readFileSync(0, "utf-8");
 		const parsed = JSON.parse(input) as Record<string, unknown>;
-		return (parsed.session_id as string) ?? "unknown";
+		return {
+			sessionId: (parsed.session_id as string) ?? "unknown",
+			cwd: (parsed.cwd as string) ?? process.cwd(),
+		};
 	} catch {
-		return "unknown";
+		return { sessionId: "unknown", cwd: process.cwd() };
 	}
 }
 
@@ -65,8 +76,11 @@ async function readSettingsJson(path: string): Promise<Record<string, unknown> |
 	let raw: string;
 	try {
 		raw = await readFile(path, "utf8");
-	} catch {
-		return {}; // Missing file — safe to create
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+			return {}; // Missing file — safe to create
+		}
+		return null; // Existing file could not be read — do not overwrite
 	}
 	try {
 		const parsed = JSON.parse(raw);
@@ -129,19 +143,26 @@ async function configureStatusLine(pluginRoot: string, branding: Branding): Prom
 	const settingsPath = join(getClaudeConfigDir(), "settings.json");
 	const settings = await readSettingsJson(settingsPath);
 	if (settings === null) {
-		return `${branding.name}: ${settingsPath} appears corrupt — skipping status line auto-configuration.`;
+		return `${branding.name}: Could not read ${settingsPath} — skipping status line auto-configuration.`;
 	}
 	const statuslineCjs = join(pluginRoot, "packages", "claude-code", "dist", "sage-statusline.cjs");
 	const command = `node "${statuslineCjs}"`;
+	// refreshInterval makes Claude Code re-run the script periodically, so the
+	// statusline picks up skill verdicts that arrive mid-session.
+	const sageStatusLine = { type: "command", command, refreshInterval: 5 };
 
 	const existing = settings.statusLine as Record<string, unknown> | undefined;
 	const existingCommand =
 		existing && typeof existing.command === "string" ? existing.command : null;
 
 	if (existingCommand?.includes(STATUSLINE_MARKER)) {
-		// Already Sage's — update path if changed
-		if (existingCommand !== command) {
-			settings.statusLine = { type: "command", command };
+		// Already Sage's — upgrade when the path changed or an older install
+		// predates refreshInterval
+		if (
+			existingCommand !== command ||
+			existing?.refreshInterval !== sageStatusLine.refreshInterval
+		) {
+			settings.statusLine = sageStatusLine;
 			await atomicWriteJson(settingsPath, settings);
 		}
 		return null;
@@ -157,13 +178,13 @@ async function configureStatusLine(pluginRoot: string, branding: Branding): Prom
 	}
 
 	// No status line configured — install Sage's
-	settings.statusLine = { type: "command", command };
+	settings.statusLine = sageStatusLine;
 	await atomicWriteJson(settingsPath, settings);
 	return null;
 }
 
 async function main(): Promise<void> {
-	const sessionId = getSessionId();
+	const { sessionId, cwd } = readHookInput();
 	const config = await loadConfig();
 	logger = createOperationalLogger(config.operational_logging, "claude-code").forComponent(
 		"session-start",
@@ -205,6 +226,12 @@ async function main(): Promise<void> {
 		plugins = plugins.filter((p) => !p.key.startsWith(prefix));
 	}
 
+	// Loose skills join the scan as pseudo-plugins, one per skill folder:
+	// personal (~/.claude/skills, key `skill:claude/...@personal`) and project
+	// (<cwd>/.claude/skills, key `skill:claude/...@project`).
+	plugins.push(...(await discoverClaudeCodeSkills(cwd)));
+
+	const noticeMessages: string[] = [];
 	const statusMsg = await runPluginScan(
 		logger,
 		"session",
@@ -217,6 +244,15 @@ async function main(): Promise<void> {
 		resolve(__dirname, "model-download-worker.cjs"),
 		"verbose",
 		resolveClaudeCodeVersion(),
+		resolve(__dirname, "skill-upload-worker.cjs"),
+		(noticeIds) => {
+			for (const id of noticeIds) {
+				const text = formatNoticeById(id, branding);
+				if (text) noticeMessages.push(text);
+			}
+		},
+		undefined,
+		config.announce_clean_scans,
 	);
 
 	// Initialize status file before registering the status line so the
@@ -236,17 +272,23 @@ async function main(): Promise<void> {
 	}
 
 	const allowlistMigration = await checkAllowlistMigration();
-	let finalMsg = statusMsg;
+	const parts: string[] = [];
+	// One-time notices (e.g. skill-upload consent) go at the top of the message.
+	if (noticeMessages.length > 0) parts.push(noticeMessages.join("\n"));
+	if (warningMessage) parts.push(warningMessage);
 	if (allowlistMigration.needed) {
-		finalMsg = `${formatAllowlistMigrationWarning(allowlistMigration.entryTypes, branding)}\n${finalMsg}`;
+		parts.push(formatAllowlistMigrationWarning(allowlistMigration.entryTypes, branding));
 	}
-	if (warningMessage) {
-		finalMsg = `${warningMessage}\n${finalMsg}`;
+	if (statusMsg) parts.push(statusMsg);
+	if (statusLineHint) parts.push(statusLineHint);
+	const finalMsg = parts.join("\n");
+	// When announce_clean_scans=false and nothing else has to be surfaced, emit
+	// an empty hook response so Claude Code shows no system banner at all.
+	if (finalMsg === "") {
+		process.stdout.write("{}\n");
+	} else {
+		process.stdout.write(`${JSON.stringify({ systemMessage: finalMsg })}\n`);
 	}
-	if (statusLineHint) {
-		finalMsg = `${finalMsg}\n${statusLineHint}`;
-	}
-	process.stdout.write(`${JSON.stringify({ systemMessage: finalMsg })}\n`);
 	await completeHook("completed", {
 		statusLineHintShown: !!statusLineHint,
 	});

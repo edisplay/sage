@@ -50,6 +50,13 @@ async function build() {
 
 	await esbuild.build({
 		...shared,
+		entryPoints: ["../core/src/skill-upload-worker.ts"],
+		outfile: "dist/skill-upload-worker.cjs",
+		external: ["koffi"],
+	});
+
+	await esbuild.build({
+		...shared,
 		entryPoints: ["src/uninstall.ts"],
 		outfile: "dist/uninstall.cjs",
 		external: ["koffi"],

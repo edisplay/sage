@@ -1,0 +1,11 @@
+{
+	"hook_event_name": "preToolUse",
+	"session_id": "00000000-0000-0000-0000-000000000000",
+	"conversation_id": "00000000-0000-0000-0000-000000000000",
+	"tool_use_id": "00000000-0000-0000-0000-000000000000",
+	"cwd": "/work",
+	"tool_name": "Shell",
+	"tool_input": {
+		"command": "echo sage-cursor-contract"
+	}
+}

@@ -67,7 +67,7 @@ function Pn(s3, t) {
 function zn(s3, t) {
   s3.head = new ue(t, void 0, s3.head, s3), s3.tail || (s3.tail = s3.head), s3.length++;
 }
-var import_events, import_fs, import_node_events, import_node_stream, import_node_string_decoder, import_node_path4, import_node_fs2, import_path, import_events2, import_assert, import_buffer, ks, import_zlib, import_node_path5, import_node_path6, import_fs2, import_fs3, import_path2, import_node_path7, import_path3, import_node_fs3, import_node_assert, import_node_crypto2, import_node_fs4, import_node_path8, import_fs4, import_node_fs5, import_node_path9, import_node_fs6, import_promises2, import_node_path10, import_node_path11, import_node_fs7, import_node_path12, kr, vr, Os, Br, Pr, zr, q, j, rt, Le, jt, Ne, Ts, Ae, xs, z, Mt, b, Qt, Bt, _, A, g, yi, De, L, w, Ri, bi, Ls, _i, Z, gi, Ie, Jt, yt, C, te, Ur, Hr, Wr, Gr, Ce, Oi, Zr, Yr, D, Vr, ot, H, ee, m, xi, J, Li, Ii, Ci, se, Fe, Ut, Ht, Ni, Pt, ht, U, nt, Y, zt, Ai, Q, ie, Di, ke, Rt, ve, bt, _t, Me, tt, Wt, $r, As, Ds, Is, Cs, Fs, Xr, re, K, jr, M, Qr, vs, Jr, ki, Ot, Gt, vi, ne, Be, Pe, ze, Ue, He, We, Ge, Ze, Ye, Ms, en, sn, Bs, rn, nn, Ps, zs, Bi, oe, hn, he, Ke, F, an, Tt, Pi, ln, at, cn, fn, dn, lt, un, mn, pn, zi, En, xt, ct, Sn, yn, Rn, bn, f, Yt, Lt, gn, Zi, Yi, On, B, Nt, et, Ui, Us, V, ae, ft, Hs, p, it, dt, Hi, At, y, Ve, $e, Wi, Ws, Gs, le, Gi, Xe, Kt, ut, qe, Dt, je, Qe, Zs, Tn, st, mt, Nn, Ki, An, Dn, It, Vi, Cn, Ys, ce, Je, $i, Fn, kn, Xi, Ks, Js, vn, Xs, qs, js, ji, Qs, fe, ti, Qi, ei, Ji, ts, es, is, pt, ii, ss, qi, X, de, si, ri, Mn, ni, ue, di, tr, oi, me, W, Ct, Ft, pe, rs, G, ns, hi, er, as, ls, ai, li, ir, os, ci, rr, hs, Et, kt, Un, Hn, or, hr, Wn, Gn, Zn, Yn, fr, dr, ar, ur, mr, pr, Kn, Vn, $n, lr, cs, fs2, ui, Xn, ds, qn, us, we, wt, Qn, Er, ms, wr, Jn, Sr, ps, yr, $t, Rr, to, eo, io, Ei, _r, gr, ys, Or, Rs, P, bs, _s, Si, Tr, xr, ye, Lr, Nr, Es, St, O, wi, Ar, Xt, ws, Ss, gs, Re, be, _e, ge, ro, Oe, no, oo, ho, Dr, qt, Se, Te, ao, lo, co, fo, uo, mo, po, Eo, vt, wo, So;
+var import_events, import_fs, import_node_events, import_node_stream, import_node_string_decoder, import_node_path4, import_node_fs2, import_path, import_events2, import_assert, import_buffer, ks, import_zlib, import_node_path5, import_node_path6, import_fs2, import_fs3, import_path2, import_node_path7, import_path3, import_node_fs3, import_node_assert, import_node_crypto2, import_node_fs4, import_node_path8, import_fs4, import_node_fs5, import_node_path9, import_node_fs6, import_promises3, import_node_path10, import_node_path11, import_node_fs7, import_node_path12, kr, vr, Os, Br, Pr, zr, q, j, rt, Le, jt, Ne, Ts, Ae, xs, z, Mt, b, Qt, Bt, _, A, g, yi, De, L, w, Ri, bi, Ls, _i, Z, gi, Ie, Jt, yt, C, te, Ur, Hr, Wr, Gr, Ce, Oi, Zr, Yr, D, Vr, ot, H, ee, m, xi, J, Li, Ii, Ci, se, Fe, Ut, Ht, Ni, Pt, ht, U, nt, Y, zt, Ai, Q, ie, Di, ke, Rt, ve, bt, _t, Me, tt, Wt, $r, As, Ds, Is, Cs, Fs, Xr, re, K, jr, M, Qr, vs, Jr, ki, Ot, Gt, vi, ne, Be, Pe, ze, Ue, He, We, Ge, Ze, Ye, Ms, en, sn, Bs, rn, nn, Ps, zs, Bi, oe, hn, he, Ke, F, an, Tt, Pi, ln, at, cn, fn, dn, lt, un, mn, pn, zi, En, xt, ct, Sn, yn, Rn, bn, f, Yt, Lt, gn, Zi, Yi, On, B, Nt, et, Ui, Us, V, ae, ft, Hs, p, it, dt, Hi, At, y, Ve, $e, Wi, Ws, Gs, le, Gi, Xe, Kt, ut, qe, Dt, je, Qe, Zs, Tn, st, mt, Nn, Ki, An, Dn, It, Vi, Cn, Ys, ce, Je, $i, Fn, kn, Xi, Ks, Js, vn, Xs, qs, js, ji, Qs, fe, ti, Qi, ei, Ji, ts, es, is, pt, ii, ss, qi, X, de, si, ri, Mn, ni, ue, di, tr, oi, me, W, Ct, Ft, pe, rs, G, ns, hi, er, as, ls, ai, li, ir, os, ci, rr, hs, Et, kt, Un, Hn, or, hr, Wn, Gn, Zn, Yn, fr, dr, ar, ur, mr, pr, Kn, Vn, $n, lr, cs, fs2, ui, Xn, ds, qn, us, we, wt, Qn, Er, ms, wr, Jn, Sr, ps, yr, $t, Rr, to, eo, io, Ei, _r, gr, ys, Or, Rs, P, bs, _s, Si, Tr, xr, ye, Lr, Nr, Es, St, O, wi, Ar, Xt, ws, Ss, gs, Re, be, _e, ge, ro, Oe, no, oo, ho, Dr, qt, Se, Te, ao, lo, co, fo, uo, mo, po, Eo, vt, wo, So;
 var init_index_min = __esm({
   "../../node_modules/.pnpm/tar@7.5.13/node_modules/tar/dist/esm/index.min.js"() {
     import_events = __toESM(require("events"), 1);
@@ -99,7 +99,7 @@ var init_index_min = __esm({
     import_node_fs5 = __toESM(require("node:fs"), 1);
     import_node_path9 = __toESM(require("node:path"), 1);
     import_node_fs6 = __toESM(require("node:fs"), 1);
-    import_promises2 = __toESM(require("node:fs/promises"), 1);
+    import_promises3 = __toESM(require("node:fs/promises"), 1);
     import_node_path10 = __toESM(require("node:path"), 1);
     import_node_path11 = require("node:path");
     import_node_fs7 = __toESM(require("node:fs"), 1);
@@ -2258,7 +2258,7 @@ var init_index_min = __esm({
         E ? e(E) : x && a ? ds(x, o, h, (xe) => S(xe)) : n ? import_node_fs6.default.chmod(s3, r, e) : e();
       };
       if (s3 === d) return Qn(s3, S);
-      if (l) return import_promises2.default.mkdir(s3, { mode: r, recursive: true }).then((E) => S(null, E ?? void 0), S);
+      if (l) return import_promises3.default.mkdir(s3, { mode: r, recursive: true }).then((E) => S(null, E ?? void 0), S);
       let N = f(import_node_path10.default.relative(d, s3)).split("/");
       ms(d, N, r, c, d, void 0, S);
     };
@@ -2970,6 +2970,7 @@ var import_node_path = require("node:path");
 var fs = __toESM(require("node:fs"), 1);
 var fsPromises = __toESM(require("node:fs/promises"), 1);
 var import_node_os = require("node:os");
+var import_promises = require("node:timers/promises");
 var name1 = "read";
 var name2 = "File";
 function getFileContent(path, encoding = "utf-8") {
@@ -2983,6 +2984,43 @@ function getProcEnv() {
 }
 function getHomeDir() {
   return getProcEnv().HOME || (0, import_node_os.homedir)();
+}
+async function removeStaleFileLock(lockPath, staleAgeMs) {
+  try {
+    const s3 = await fsPromises.stat(lockPath);
+    if (Date.now() - s3.mtimeMs < staleAgeMs) return;
+    await fsPromises.rmdir(lockPath);
+  } catch {
+  }
+}
+async function acquireFileLock(filePath, timeoutMs = 250, staleAgeMs = 3e4) {
+  const lockPath = `${filePath}.lock`;
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    try {
+      await fsPromises.mkdir(lockPath);
+      return async () => {
+        try {
+          await fsPromises.rmdir(lockPath);
+        } catch {
+        }
+      };
+    } catch {
+      await removeStaleFileLock(lockPath, staleAgeMs);
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) return void 0;
+      await (0, import_promises.setTimeout)(Math.min(50, remainingMs));
+    }
+  }
+}
+async function withFileLock(filePath, callback) {
+  const release = await acquireFileLock(filePath);
+  if (!release) return;
+  try {
+    return await callback();
+  } finally {
+    await release();
+  }
 }
 
 // ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/external.js
@@ -7099,14 +7137,21 @@ var PackageCheckConfigSchema = external_exports.object({
 var AmsiCheckConfigSchema = external_exports.object({
   enabled: external_exports.boolean().default(true)
 });
-var DEFAULT_PI_HIGH_RISK_THRESHOLD = 0.99;
-var DEFAULT_PI_MEDIUM_RISK_THRESHOLD = 0.5;
+var SkillCheckConfigSchema = external_exports.object({
+  enabled: external_exports.boolean().default(true),
+  cache_ttl_days: external_exports.number().min(0).default(1),
+  /**
+   * Upload unknown skills (never seen by the analyzer) for deep content
+   * analysis. When false, the scan still looks skills up by content hash and
+   * still flags known-risky ones — but no skill content ever leaves the
+   * machine and the upload worker never runs (lookup-only mode).
+   */
+  upload_enabled: external_exports.boolean().default(true)
+});
 var PiCheckConfigSchema = external_exports.object({
   enabled: external_exports.boolean().default(false),
   max_content_length: external_exports.number().default(16384),
-  model_path: external_exports.string().optional(),
-  high_risk_threshold: external_exports.number().default(DEFAULT_PI_HIGH_RISK_THRESHOLD),
-  medium_risk_threshold: external_exports.number().default(DEFAULT_PI_MEDIUM_RISK_THRESHOLD)
+  model_path: external_exports.string().optional()
 });
 var ExceptionDecisionSchema = external_exports.enum(["allow", "deny"]);
 var ExceptionMatchSchema = external_exports.enum(["executable", "domain", "path", "plugin", "regex"]);
@@ -7128,6 +7173,7 @@ var ConfigSchema = external_exports.object({
   file_check: FileCheckConfigSchema.default({}),
   package_check: PackageCheckConfigSchema.default({}),
   amsi_check: AmsiCheckConfigSchema.default({}),
+  skill_check: SkillCheckConfigSchema.default({}),
   pi_check: PiCheckConfigSchema.default({}),
   heuristics_enabled: external_exports.boolean().default(true),
   cache: CacheConfigSchema.default({}),
@@ -7136,6 +7182,7 @@ var ConfigSchema = external_exports.object({
   operational_logging: OperationalLoggingConfigSchema.default({}),
   sensitivity: SensitivitySchema.default("balanced"),
   disabled_threats: external_exports.array(external_exports.string()).default([]),
+  announce_clean_scans: external_exports.boolean().default(true),
   brand_key: external_exports.string().min(1).max(32).regex(/^[a-z0-9_-]+$/u).optional(),
   community_iq: external_exports.boolean().default(true)
 });
@@ -7150,6 +7197,8 @@ var HookTypeSchema = external_exports.enum([
 
 // ../core/src/config.ts
 var SAGE_DIR = "~/.sage";
+var MS_PER_DAY = 24 * 60 * 60 * 1e3;
+var CLOCK_SKEW_TOLERANCE_MS = 5 * 60 * 1e3;
 function resolvedSageDir() {
   return resolvePath(SAGE_DIR);
 }
@@ -7216,7 +7265,7 @@ function sanitizeBrandKey(data, logger) {
   if (typeof brandKey === "string" && brandKey.length >= 1 && brandKey.length <= 32 && BRAND_KEY_RE.test(brandKey)) {
     return data;
   }
-  logger.warn(`Invalid brand_key in config \u2014 ignoring`, { brand_key: brandKey });
+  logger.warn(`Invalid brand_key in config - ignoring`, { brand_key: brandKey });
   const { brand_key: _2, ...rest } = data;
   return rest;
 }
@@ -7284,7 +7333,7 @@ async function loadConfig(configPath, logger = nullLogger) {
 
 // ../core/src/installation-id.ts
 var import_node_crypto = require("node:crypto");
-var import_promises = require("node:fs/promises");
+var import_promises2 = require("node:fs/promises");
 var import_node_path2 = require("node:path");
 async function getInstallationId(sageDirPath) {
   const sageDir = sageDirPath ?? resolvePath("~/.sage");
@@ -7299,8 +7348,8 @@ async function getInstallationId(sageDirPath) {
   }
   try {
     const id = (0, import_node_crypto.randomUUID)();
-    await (0, import_promises.mkdir)(sageDir, { recursive: true, mode: 448 });
-    await (0, import_promises.writeFile)(idPath, id, { encoding: "utf-8", mode: 384, flag: fileExists ? "w" : "wx" });
+    await (0, import_promises2.mkdir)(sageDir, { recursive: true, mode: 448 });
+    await (0, import_promises2.writeFile)(idPath, id, { encoding: "utf-8", mode: 384, flag: fileExists ? "w" : "wx" });
     return id;
   } catch (err) {
     if (err.code === "EEXIST") {
@@ -7318,17 +7367,18 @@ async function getInstallationId(sageDirPath) {
 // ../core/src/clients/model-downloader.ts
 var import_node_crypto3 = require("node:crypto");
 var import_node_fs8 = require("node:fs");
-var import_promises3 = require("node:fs/promises");
+var import_promises4 = require("node:fs/promises");
 var import_node_path13 = require("node:path");
 var import_node_stream2 = require("node:stream");
-var import_promises4 = require("node:stream/promises");
+var import_promises5 = require("node:stream/promises");
 
 // ../core/src/model-storage.ts
 var import_node_fs = require("node:fs");
 var import_node_path3 = require("node:path");
-var MODEL_SCHEMA_VERSION = "v1";
+var MODEL_SCHEMA_VERSION = "v2";
 var REQUIRED_MODELS_BY_SCHEMA = {
-  v1: ["pi-model"]
+  v1: ["pi-model"],
+  v2: ["pi-model"]
 };
 var REQUIRED_MODEL_FILES = {
   "pi-model": [
@@ -7377,8 +7427,8 @@ async function downloadModel(opts) {
   const stagingDir = getDownloadStagingDir(sageDir);
   const lockPath = `${modelDir}.lock`;
   try {
-    await (0, import_promises3.mkdir)(stagingDir, { recursive: true });
-    await (0, import_promises3.mkdir)((0, import_node_path13.resolve)(modelDir, ".."), { recursive: true });
+    await (0, import_promises4.mkdir)(stagingDir, { recursive: true });
+    await (0, import_promises4.mkdir)((0, import_node_path13.resolve)(modelDir, ".."), { recursive: true });
   } catch (err) {
     logger.warn(`failed to prepare model storage for ${modelName}: ${err}`);
     return false;
@@ -7404,7 +7454,7 @@ async function downloadModel(opts) {
       });
       return false;
     }
-    await (0, import_promises3.mkdir)(extractDir, { recursive: true });
+    await (0, import_promises4.mkdir)(extractDir, { recursive: true });
     await extractTarGz(archivePath, extractDir);
     const extractDirResolved = extractDir;
     const missing = requiredModelFiles(modelName).filter(
@@ -7417,26 +7467,26 @@ async function downloadModel(opts) {
     const aside = `${modelDir}.${suffix}.old`;
     let asideUsed = false;
     if (await pathExists(modelDir)) {
-      await (0, import_promises3.rename)(modelDir, aside);
+      await (0, import_promises4.rename)(modelDir, aside);
       asideUsed = true;
     }
     try {
-      await (0, import_promises3.rename)(extractDir, modelDir);
+      await (0, import_promises4.rename)(extractDir, modelDir);
       extractDir = null;
     } catch (err) {
       if (asideUsed) {
         try {
-          await (0, import_promises3.rename)(aside, modelDir);
+          await (0, import_promises4.rename)(aside, modelDir);
         } catch {
         }
       }
       throw err;
     }
     if (asideUsed) {
-      await (0, import_promises3.rm)(aside, { recursive: true, force: true }).catch(() => {
+      await (0, import_promises4.rm)(aside, { recursive: true, force: true }).catch(() => {
       });
     }
-    await (0, import_promises3.unlink)(archivePath).catch(() => {
+    await (0, import_promises4.unlink)(archivePath).catch(() => {
     });
     archivePath = null;
     logger.info(`model ${modelName} installed (schema ${schema})`);
@@ -7448,14 +7498,14 @@ async function downloadModel(opts) {
     return false;
   } finally {
     if (extractDir) {
-      await (0, import_promises3.rm)(extractDir, { recursive: true, force: true }).catch(() => {
+      await (0, import_promises4.rm)(extractDir, { recursive: true, force: true }).catch(() => {
       });
     }
     if (archivePath) {
-      await (0, import_promises3.unlink)(archivePath).catch(() => {
+      await (0, import_promises4.unlink)(archivePath).catch(() => {
       });
     }
-    await (0, import_promises3.unlink)(lockPath).catch(() => {
+    await (0, import_promises4.unlink)(lockPath).catch(() => {
     });
   }
 }
@@ -7468,11 +7518,11 @@ async function streamFetchToFile(url, destPath, fetchImpl = fetch) {
     throw new Error(`empty response body from ${url}`);
   }
   const nodeStream = import_node_stream2.Readable.fromWeb(response.body);
-  await (0, import_promises4.pipeline)(nodeStream, (0, import_node_fs8.createWriteStream)(destPath));
+  await (0, import_promises5.pipeline)(nodeStream, (0, import_node_fs8.createWriteStream)(destPath));
 }
 async function sha256OfFile(path) {
   const hash = (0, import_node_crypto3.createHash)("sha256");
-  const buf = await (0, import_promises3.readFile)(path);
+  const buf = await (0, import_promises4.readFile)(path);
   hash.update(buf);
   return hash.digest("hex");
 }
@@ -7486,7 +7536,7 @@ async function extractTarGz(archivePath, destDir) {
 }
 async function pathExists(path) {
   try {
-    await (0, import_promises3.stat)(path);
+    await (0, import_promises4.stat)(path);
     return true;
   } catch {
     return false;
@@ -7503,7 +7553,7 @@ function fileExistsSync(path) {
 async function tryAcquireLock(lockPath, logger) {
   try {
     const payload = JSON.stringify({ pid: process.pid, ts: Date.now() });
-    await (0, import_promises3.writeFile)(lockPath, payload, { flag: "wx" });
+    await (0, import_promises4.writeFile)(lockPath, payload, { flag: "wx" });
     return true;
   } catch (err) {
     const code = err.code;
@@ -7513,15 +7563,15 @@ async function tryAcquireLock(lockPath, logger) {
     }
   }
   try {
-    const raw = await (0, import_promises3.readFile)(lockPath, "utf-8");
+    const raw = await (0, import_promises4.readFile)(lockPath, "utf-8");
     const parsed = JSON.parse(raw);
     const age = Date.now() - (parsed.ts ?? 0);
     if (age > STALE_LOCK_MS) {
-      await (0, import_promises3.unlink)(lockPath).catch(() => {
+      await (0, import_promises4.unlink)(lockPath).catch(() => {
       });
       try {
         const payload = JSON.stringify({ pid: process.pid, ts: Date.now() });
-        await (0, import_promises3.writeFile)(lockPath, payload, { flag: "wx" });
+        await (0, import_promises4.writeFile)(lockPath, payload, { flag: "wx" });
         return true;
       } catch {
         return false;
@@ -7533,7 +7583,7 @@ async function tryAcquireLock(lockPath, logger) {
 }
 
 // ../core/src/sage-proxy.ts
-function mapSageProxyOs(platform) {
+function mapSageHostOs(platform) {
   switch (platform) {
     case "win32":
       return "WINDOWS";
@@ -7545,21 +7595,37 @@ function mapSageProxyOs(platform) {
       return platform;
   }
 }
-function mapSageProxyArchitecture(arch) {
+function mapSageHostArchitecture(arch) {
   return arch.toUpperCase();
+}
+function buildSageUserConfig(config) {
+  return {
+    sensitivity: config.sensitivity,
+    url_check_enabled: config.url_check.enabled,
+    file_check_enabled: config.file_check.enabled,
+    package_check_enabled: config.package_check.enabled,
+    heuristics_enabled: config.heuristics_enabled,
+    pi_check_enabled: config.pi_check.enabled,
+    community_iq_enabled: config.community_iq,
+    // Optional-chained + defaulted: real callers pass a loadConfig result (skill_check
+    // always present via the schema default), but this feeds fail-open telemetry, so a
+    // partial config must never crash the envelope build.
+    skill_check_upload_enabled: config.skill_check?.upload_enabled ?? true
+  };
 }
 function buildSageProxyEnvelope(args) {
   return {
     identity: { uuid: args.iid },
     product: { version_app: args.versionApp },
     platform: {
-      os: args.platformOs ?? mapSageProxyOs(process.platform),
-      architecture: args.platformArchitecture ?? mapSageProxyArchitecture(process.arch)
+      os: args.platformOs ?? mapSageHostOs(process.platform),
+      architecture: args.platformArchitecture ?? mapSageHostArchitecture(process.arch)
     },
     agent: {
       agent_runtime: args.agentRuntime,
       agent_runtime_version: args.agentRuntimeVersion
-    }
+    },
+    ...args.config ? { config: buildSageUserConfig(args.config) } : {}
   };
 }
 
@@ -7568,7 +7634,7 @@ var import_node_path14 = require("node:path");
 var import_node_url = require("node:url");
 var import_meta = {};
 function resolveVersion() {
-  if (true) return "0.11.0";
+  if (true) return "0.12.0";
   try {
     const pkgPath = (0, import_node_path14.join)((0, import_node_path14.dirname)((0, import_node_url.fileURLToPath)(import_meta.url)), "..", "package.json");
     const pkg = JSON.parse(getFileContentSync(pkgPath));
@@ -7607,14 +7673,23 @@ async function fetchModelManifest(args) {
     logger.debug("Skipping model manifest fetch: missing installation id");
     return null;
   }
-  const envelope = buildSageProxyEnvelope({
-    iid: args.iid,
-    versionApp: args.versionApp ?? VERSION,
-    agentRuntime: args.agentRuntime,
-    agentRuntimeVersion: args.agentRuntimeVersion ?? "unknown"
-  });
-  const body = { ...envelope, models: { schema: args.schema } };
+  let config = args.config;
+  if (!config) {
+    try {
+      config = await loadConfig(args.configPath, logger);
+    } catch (err) {
+      logger.debug(`Model manifest config load failed: ${err}`);
+    }
+  }
   try {
+    const envelope = buildSageProxyEnvelope({
+      iid: args.iid,
+      versionApp: args.versionApp ?? VERSION,
+      agentRuntime: args.agentRuntime,
+      agentRuntimeVersion: args.agentRuntimeVersion ?? "unknown",
+      config
+    });
+    const body = { ...envelope, models: { schema: args.schema } };
     const response = await fetch(resolveEndpoint("/v2/model-manifest"), {
       method: "POST",
       signal: AbortSignal.timeout(timeoutMs),
@@ -7691,6 +7766,8 @@ async function ensureModelsAvailable(args) {
     schema,
     agentRuntime: args.agentRuntime ?? "unknown",
     agentRuntimeVersion: args.agentRuntimeVersion,
+    config: args.config,
+    configPath: args.configPath,
     versionApp: args.versionApp,
     logger
   });
@@ -7736,78 +7813,42 @@ async function ensureModelsAvailable(args) {
 }
 
 // ../core/src/jsonl-log-writer.ts
-var import_promises5 = require("node:fs/promises");
+var import_promises6 = require("node:fs/promises");
 var import_node_path15 = require("node:path");
-var import_promises6 = require("node:timers/promises");
 var writeQueues = /* @__PURE__ */ new Map();
-var ROTATE_LOCK_TIMEOUT_MS = 250;
-var ROTATE_LOCK_STALE_MS = 3e4;
-var ROTATE_LOCK_POLL_MS = 50;
 async function shouldRotate(filePath, maxBytes, maxFiles) {
   if (maxBytes <= 0 || maxFiles <= 0) return false;
   try {
-    const s3 = await (0, import_promises5.stat)(filePath);
+    const s3 = await (0, import_promises6.stat)(filePath);
     return s3.size >= maxBytes;
   } catch {
     return false;
   }
 }
-async function removeStaleRotateLock(lockPath) {
-  try {
-    const s3 = await (0, import_promises5.stat)(lockPath);
-    if (Date.now() - s3.mtimeMs < ROTATE_LOCK_STALE_MS) return;
-    await (0, import_promises5.rmdir)(lockPath);
-  } catch {
-  }
-}
-async function acquireRotateLock(filePath) {
-  const lockPath = `${filePath}.lock`;
-  const deadline = Date.now() + ROTATE_LOCK_TIMEOUT_MS;
-  while (true) {
-    try {
-      await (0, import_promises5.mkdir)(lockPath);
-      return async () => {
-        try {
-          await (0, import_promises5.rmdir)(lockPath);
-        } catch {
-        }
-      };
-    } catch {
-      await removeStaleRotateLock(lockPath);
-      const remainingMs = deadline - Date.now();
-      if (remainingMs <= 0) return void 0;
-      await (0, import_promises6.setTimeout)(Math.min(ROTATE_LOCK_POLL_MS, remainingMs));
-    }
-  }
-}
 async function rotateIfNeeded(filePath, maxBytes, maxFiles) {
   if (!await shouldRotate(filePath, maxBytes, maxFiles)) return;
-  const releaseLock = await acquireRotateLock(filePath);
-  if (!releaseLock) return;
-  try {
+  await withFileLock(filePath, async () => {
     if (!await shouldRotate(filePath, maxBytes, maxFiles)) return;
     try {
-      await (0, import_promises5.unlink)(`${filePath}.${maxFiles}`);
+      await (0, import_promises6.unlink)(`${filePath}.${maxFiles}`);
     } catch {
     }
     for (let i = maxFiles - 1; i >= 1; i--) {
       try {
-        await (0, import_promises5.rename)(`${filePath}.${i}`, `${filePath}.${i + 1}`);
+        await (0, import_promises6.rename)(`${filePath}.${i}`, `${filePath}.${i + 1}`);
       } catch {
       }
     }
     try {
-      await (0, import_promises5.rename)(filePath, `${filePath}.1`);
+      await (0, import_promises6.rename)(filePath, `${filePath}.1`);
     } catch {
     }
-  } finally {
-    await releaseLock();
-  }
+  });
 }
 async function appendJsonlEntryNow(path, config, entry) {
-  await (0, import_promises5.mkdir)((0, import_node_path15.dirname)(path), { recursive: true });
+  await (0, import_promises6.mkdir)((0, import_node_path15.dirname)(path), { recursive: true });
   await rotateIfNeeded(path, config.max_bytes, config.max_files);
-  await (0, import_promises5.appendFile)(path, `${JSON.stringify(entry)}
+  await (0, import_promises6.appendFile)(path, `${JSON.stringify(entry)}
 `);
 }
 async function appendJsonlEntry(config, entry) {
@@ -7937,11 +7978,12 @@ function createOperationalLogger(config, runtime) {
 async function readWorkerArgs() {
   const env = process.env;
   const sageDir = env.SAGE_DIR ? resolvePath(env.SAGE_DIR) : resolvePath("~/.sage");
+  const configPath = env.SAGE_CONFIG_PATH ? resolvePath(env.SAGE_CONFIG_PATH) : void 0;
   const agentRuntime = env.SAGE_AGENT_RUNTIME ?? "unknown";
   const agentRuntimeVersion = env.SAGE_AGENT_RUNTIME_VERSION || void 0;
   const versionApp = env.SAGE_VERSION_APP || void 0;
   const schema = env.SAGE_MODEL_SCHEMA || MODEL_SCHEMA_VERSION;
-  return { sageDir, agentRuntime, agentRuntimeVersion, versionApp, schema };
+  return { sageDir, configPath, agentRuntime, agentRuntimeVersion, versionApp, schema };
 }
 async function createWorkerLogger(agentRuntime) {
   try {
@@ -7981,6 +8023,7 @@ async function workerMain() {
       iid,
       agentRuntime: args.agentRuntime,
       agentRuntimeVersion: args.agentRuntimeVersion,
+      configPath: args.configPath,
       versionApp: args.versionApp,
       schema: args.schema,
       logger

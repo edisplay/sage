@@ -2,10 +2,10 @@
  * Shared JSONL log file writer.
  */
 
-import { appendFile, mkdir, rename, rmdir, stat, unlink } from "node:fs/promises";
+import { appendFile, mkdir, rename, stat, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
-import { setTimeout as sleep } from "node:timers/promises";
 import { resolvePath } from "./config.js";
+import { withFileLock } from "./file-utils.js";
 
 export interface JsonlLogConfig {
 	path: string;
@@ -14,9 +14,6 @@ export interface JsonlLogConfig {
 }
 
 const writeQueues = new Map<string, Promise<void>>();
-const ROTATE_LOCK_TIMEOUT_MS = 250;
-const ROTATE_LOCK_STALE_MS = 30_000;
-const ROTATE_LOCK_POLL_MS = 50;
 
 async function shouldRotate(
 	filePath: string,
@@ -33,39 +30,6 @@ async function shouldRotate(
 	}
 }
 
-async function removeStaleRotateLock(lockPath: string): Promise<void> {
-	try {
-		const s = await stat(lockPath);
-		if (Date.now() - s.mtimeMs < ROTATE_LOCK_STALE_MS) return;
-		await rmdir(lockPath);
-	} catch {
-		// Missing or raced lock cleanup is OK; the next acquire attempt decides.
-	}
-}
-
-async function acquireRotateLock(filePath: string): Promise<(() => Promise<void>) | undefined> {
-	const lockPath = `${filePath}.lock`;
-	const deadline = Date.now() + ROTATE_LOCK_TIMEOUT_MS;
-
-	while (true) {
-		try {
-			await mkdir(lockPath);
-			return async () => {
-				try {
-					await rmdir(lockPath);
-				} catch {
-					// Fail-open: lock cleanup errors must not affect logging.
-				}
-			};
-		} catch {
-			await removeStaleRotateLock(lockPath);
-			const remainingMs = deadline - Date.now();
-			if (remainingMs <= 0) return undefined;
-			await sleep(Math.min(ROTATE_LOCK_POLL_MS, remainingMs));
-		}
-	}
-}
-
 /**
  * Classic logrotate: shift numbered backups and rename active file to .1.
  * Rotation is guarded by a short cross-process lock; writes themselves remain
@@ -75,9 +39,7 @@ async function acquireRotateLock(filePath: string): Promise<(() => Promise<void>
 async function rotateIfNeeded(filePath: string, maxBytes: number, maxFiles: number): Promise<void> {
 	if (!(await shouldRotate(filePath, maxBytes, maxFiles))) return;
 
-	const releaseLock = await acquireRotateLock(filePath);
-	if (!releaseLock) return;
-	try {
+	await withFileLock(filePath, async () => {
 		if (!(await shouldRotate(filePath, maxBytes, maxFiles))) return;
 
 		try {
@@ -99,9 +61,7 @@ async function rotateIfNeeded(filePath: string, maxBytes: number, maxFiles: numb
 		} catch {
 			// ENOENT OK
 		}
-	} finally {
-		await releaseLock();
-	}
+	});
 }
 
 async function appendJsonlEntryNow(

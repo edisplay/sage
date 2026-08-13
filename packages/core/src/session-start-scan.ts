@@ -3,9 +3,10 @@
  * Hooks provide transport-specific paths and output formatting.
  */
 
+import { join } from "node:path";
 import { logPluginScan } from "./audit-log.js";
 import { AmsiClient, isAmsiSupported } from "./clients/amsi.js";
-import { loadConfig } from "./config.js";
+import { loadConfig, skillCacheTtlMs } from "./config.js";
 import { findPluginAllowException, findPluginDenyException, loadExceptions } from "./exceptions.js";
 import {
 	computeConfigHash,
@@ -36,6 +37,13 @@ export interface SessionStartScanContext {
 	scanCachePath?: string;
 	checkUrls?: boolean;
 	checkFileHashes?: boolean;
+	/** Resolved absolute path to the sage data directory; used to derive skill
+	 *  pending and verdict-cache paths so they stay consistent with the worker. */
+	sageDirPath?: string;
+	/** Agent runtime running this scan (e.g. "cursor"); recorded as skill verdict origin. */
+	agentRuntime?: string;
+	uploadUnknownSkills?: boolean;
+	deferUnknownSkills?: boolean;
 }
 
 export function fromCachedFinding(finding: PluginFindingData): PluginFinding {
@@ -144,6 +152,14 @@ async function scanAllPlugins(
 		findingsCount: 0,
 	};
 
+	const skillPendingPath = context.sageDirPath
+		? join(context.sageDirPath, "skill_pending.json")
+		: undefined;
+	const skillVerdictCachePath = context.sageDirPath
+		? join(context.sageDirPath, "skill_verdict_cache.json")
+		: undefined;
+	const cacheTtlMs = skillCacheTtlMs(config);
+
 	for (const plugin of plugins) {
 		// 1. Exception checks — always run first, before cache
 		const denyMatch = findPluginDenyException(exceptions, plugin.key);
@@ -172,7 +188,7 @@ async function scanAllPlugins(
 		}
 
 		// 2. Cache check (only reached when no exception matched)
-		const cached = getCached(cache, plugin.key, plugin.version, plugin.lastUpdated);
+		const cached = getCached(cache, plugin.key, plugin.version, plugin.lastUpdated, cacheTtlMs);
 		if (cached && cached.findings.length === 0) {
 			stats.cacheHitsClean += 1;
 			continue;
@@ -194,18 +210,33 @@ async function scanAllPlugins(
 		const result = await scanPlugin(plugin, {
 			checkUrls: context.checkUrls ?? true,
 			checkFileHashes: context.checkFileHashes ?? true,
+			checkSkills: config.skill_check.enabled,
+			uploadEnabled: context.uploadUnknownSkills ?? config.skill_check.upload_enabled,
+			deferUnknownSkills: context.deferUnknownSkills,
 			amsiClient,
 			logger,
+			skillPendingPath,
+			skillVerdictCachePath,
+			skillVerdictTtlMs: cacheTtlMs,
+			loggingConfig: config.logging,
+			agentRuntime: context.agentRuntime,
 		});
 
-		storeResult(
-			cache,
-			plugin.key,
-			plugin.version,
-			plugin.lastUpdated,
-			result.findings.map(toFindingData),
-		);
-		cacheModified = true;
+		// Don't cache a plugin whose skill verdict is still pending (queued for
+		// the upload worker) — re-scan next session to pick up the verdict and
+		// surface it as a finding for skills that are still installed.
+		if (result.deferCache) {
+			logger.debug("Plugin cache deferred (skill verdict pending)", { plugin: plugin.key });
+		} else {
+			storeResult(
+				cache,
+				plugin.key,
+				plugin.version,
+				plugin.lastUpdated,
+				result.findings.map(toFindingData),
+			);
+			cacheModified = true;
+		}
 
 		if (result.findings.length > 0) {
 			stats.findingsCount += result.findings.length;

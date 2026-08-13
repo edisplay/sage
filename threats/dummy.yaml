@@ -2,8 +2,13 @@
 # Author: Test — NOT real threats
 #
 # Canary rules that match completely harmless, highly-specific marker strings.
-# The "__sage_test_" prefix would never appear in real-world code,
-# making false positives essentially impossible.
+# The markers are deliberately OPAQUE (e.g. "diagmark_cmd_a75bf229", not
+# "__sage_test_deny_cmd_..."): a self-describing name reads as a security probe, and
+# a safety-trained model given security context (e.g. OpenCode, which injects Sage's
+# scan findings into the prompt) will REFUSE to run it — so the artifact never
+# reaches Sage and the E2E deny/ask test can't fire. Opaque markers run as rote yet
+# stay unique random strings, so false positives are essentially impossible. The
+# rule id/title carry the human-readable meaning; the hex suffix aids traceability.
 #
 # Coverage matrix:
 #   Tool           match_on    block(deny)  require_approval(ask)  log(allow)
@@ -24,7 +29,7 @@
   category: testing
   severity: critical
   confidence: 0.95
-  pattern: "__sage_test_deny_cmd_a75bf229__"
+  pattern: "diagmark_cmd_a75bf229"
   match_on: command
   title: "[TEST] Canary deny command (alpha)"
   expires_at: null
@@ -34,7 +39,7 @@
   category: testing
   severity: critical
   confidence: 0.95
-  pattern: "__sage_test_deny_run_c3d91e4a__"
+  pattern: "diagmark_run_c3d91e4a"
   match_on: command
   title: "[TEST] Canary deny command (bravo)"
   expires_at: null
@@ -44,7 +49,7 @@
   category: testing
   severity: warning
   confidence: 0.60
-  pattern: "__sage_test_ask_cmd_8f2e6b71__"
+  pattern: "diagmark_cmd_8f2e6b71"
   match_on: command
   title: "[TEST] Canary approval command (alpha)"
   expires_at: null
@@ -54,7 +59,7 @@
   category: testing
   severity: warning
   confidence: 0.60
-  pattern: "__sage_test_ask_run_d4a09c53__"
+  pattern: "diagmark_run_d4a09c53"
   match_on: command
   title: "[TEST] Canary approval command (bravo)"
   expires_at: null
@@ -64,7 +69,7 @@
   category: testing
   severity: info
   confidence: 0.10
-  pattern: "__sage_test_log_cmd_1b7e3f82__"
+  pattern: "diagmark_cmd_1b7e3f82"
   match_on: command
   title: "[TEST] Canary log-only command"
   expires_at: null
@@ -77,7 +82,7 @@
   category: testing
   severity: critical
   confidence: 0.95
-  pattern: "__sage_test_deny_file_e6c4a918__"
+  pattern: "diagmark_file_e6c4a918"
   match_on: file_path
   title: "[TEST] Canary deny file path"
   expires_at: null
@@ -87,7 +92,7 @@
   category: testing
   severity: warning
   confidence: 0.60
-  pattern: "__sage_test_ask_file_52fd7b36__"
+  pattern: "diagmark_file_52fd7b36"
   match_on: file_path
   title: "[TEST] Canary approval file path"
   expires_at: null
@@ -97,7 +102,7 @@
   category: testing
   severity: info
   confidence: 0.10
-  pattern: "__sage_test_log_file_9a13de74__"
+  pattern: "diagmark_file_9a13de74"
   match_on: file_path
   title: "[TEST] Canary log-only file path"
   expires_at: null
@@ -110,7 +115,7 @@
   category: testing
   severity: critical
   confidence: 0.95
-  pattern: "__SAGE_TEST_DENY_CONTENT_3c8f15b7__"
+  pattern: "diagmark_content_3c8f15b7"
   match_on: content
   title: "[TEST] Canary deny content"
   expires_at: null
@@ -120,7 +125,7 @@
   category: testing
   severity: warning
   confidence: 0.60
-  pattern: "__SAGE_TEST_ASK_CONTENT_7d4ea2c9__"
+  pattern: "diagmark_content_7d4ea2c9"
   match_on: content
   title: "[TEST] Canary approval content"
   expires_at: null
@@ -130,7 +135,7 @@
   category: testing
   severity: info
   confidence: 0.10
-  pattern: "__SAGE_TEST_LOG_CONTENT_f0b683d1__"
+  pattern: "diagmark_content_f0b683d1"
   match_on: content
   title: "[TEST] Canary log-only content"
   expires_at: null
@@ -144,7 +149,7 @@
   category: testing
   severity: critical
   confidence: 0.95
-  pattern: "sage-canary-deny-4e91ca37\\.test"
+  pattern: "diaghost-4e91ca37\\.test"
   match_on: url
   title: "[TEST] Canary deny URL"
   expires_at: null
@@ -154,7 +159,7 @@
   category: testing
   severity: warning
   confidence: 0.60
-  pattern: "sage-canary-ask-b26d80f5\\.test"
+  pattern: "diaghost-b26d80f5\\.test"
   match_on: url
   title: "[TEST] Canary approval URL"
   expires_at: null
@@ -164,7 +169,7 @@
   category: testing
   severity: info
   confidence: 0.10
-  pattern: "sage-canary-log-65f3d7a4\\.test"
+  pattern: "diaghost-65f3d7a4\\.test"
   match_on: url
   title: "[TEST] Canary log-only URL"
   expires_at: null
@@ -177,7 +182,7 @@
   category: testing
   severity: critical
   confidence: 0.95
-  pattern: "sage-canary-domain-0c82eb16\\.test"
+  pattern: "diaghost-0c82eb16\\.test"
   match_on: domain
   title: "[TEST] Canary deny domain"
   expires_at: null

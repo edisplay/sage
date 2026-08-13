@@ -177,14 +177,14 @@ async function verifyHookPipelineBlocksThreat() {
 					hook_event_name: "preToolUse",
 					tool_name: "Write",
 					tool_input: {
-						file_path: "/tmp/__sage_test_deny_file_e6c4a918__.txt",
+						file_path: "/tmp/diagmark_file_e6c4a918.txt",
 						content: "hello",
 					},
 				}
 			: {
 					tool_name: "create_file",
 					tool_input: {
-						filePath: "/tmp/__sage_test_deny_file_e6c4a918__.txt",
+						filePath: "/tmp/diagmark_file_e6c4a918.txt",
 						content: "hello",
 					},
 				};
@@ -219,9 +219,9 @@ async function verifyHookPipelineBlocksThreat() {
 async function verifyToolCoverageDeny() {
 	assert.ok(fs.existsSync(hookRunnerPath), `Expected hook runner at ${hookRunnerPath}`);
 
-	const canaryFilePath = "/tmp/__sage_test_deny_file_e6c4a918__.txt";
-	const canaryCommand = "echo __sage_test_deny_cmd_a75bf229__";
-	const canaryUrl = "https://sage-canary-deny-4e91ca37.test/page";
+	const canaryFilePath = "/tmp/diagmark_file_e6c4a918.txt";
+	const canaryCommand = "echo diagmark_cmd_a75bf229";
+	const canaryUrl = "https://diaghost-4e91ca37.test/page";
 	const canaryPatchInput = `*** Update File: ${canaryFilePath}\n--- a\n+++ b\n@@ -1 +1 @@\n-old\n+new`;
 
 	const payloads =

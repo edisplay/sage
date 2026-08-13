@@ -30,6 +30,7 @@ packages/
 | `engine.ts` | Decision engine — combines signals into a Verdict |
 | `threat-loader.ts` | Loads YAML threat definitions |
 | `config.ts` | Config loading and validation (Zod schemas) |
+| `config-defaults.ts` | Default config serializer and `~/.sage/config.defaults.json` deployment |
 | `cache.ts` | JSON file verdict cache with TTLs |
 | `audit-log.ts` | JSONL audit logging |
 | `trusted-domains.ts` | Trusted domain loading and matching |
@@ -45,6 +46,8 @@ packages/
 | `content-snapshot.ts` | Structured `content` snapshot builder (per-field caps + home-path scrubbing) shared by audit log, detection telemetry, and FP reporting |
 | `extended-info.ts` | `~/.sage/extended-info.json` loader/sanitizer + `mergeExtendedInfo` helper |
 | `product-version.ts` | Platform-agnostic `product.json` version reader used by hook runner and MCP server child processes |
+
+Session start deploys `ConfigSchema`'s portable defaults to `~/.sage/config.defaults.json` for GUI tools. Bump `CONFIG_DEFAULTS_SCHEMA_VERSION` whenever that serialized defaults payload changes, including added or removed fields, type changes, and default-value changes. The version establishes deployment precedence between concurrently installed Sage versions; it is not only a JSON compatibility marker.
 
 ### Connector Architecture
 
@@ -154,13 +157,8 @@ Git hooks are installed automatically by `pnpm install` (via `core.hooksPath`). 
 | `pnpm test -- --reporter=verbose` | Verbose test output |
 | `pnpm test -- <file>` | Run a single test file |
 | `pnpm test -- -t "name"` | Run tests matching name |
-| `pnpm test:e2e` | All E2E tests (Claude Code + OpenClaw + OpenCode + Cursor + VS Code + Copilot CLI) |
-| `pnpm test:e2e:claude` | Claude Code E2E tests only |
-| `pnpm test:e2e:openclaw` | OpenClaw E2E tests only |
-| `pnpm test:e2e:opencode` | OpenCode E2E tests only |
-| `pnpm test:e2e:cursor` | Cursor extension E2E tests only |
-| `pnpm test:e2e:vscode` | VS Code extension E2E tests only |
-| `pnpm test:e2e:copilot-cli` | Copilot CLI E2E tests only |
+| `e2e/run.sh <agent>` | Containerized live E2E (Layer 2) for one agent: `claude`, `copilot`, `opencode`, `cursor`, `openclaw`, `vscode` (or `all`). Builds the pinned agent image, then runs the suite in container mode. Requires Docker + `e2e/.env`. |
+| `pnpm test:e2e:cursor` / `:vscode` | Desktop Extension Host suite (Layer 3) against an installed Cursor / VS Code binary. The other `test:e2e:*` scripts are the in-container entry points invoked by `e2e/run.sh` and skip outside container mode. |
 | `pnpm build:sea` | Build standalone SEA binaries |
 | `pnpm lint` | Lint with Biome |
 | `pnpm lint:fix` | Lint + auto-fix |
@@ -169,20 +167,89 @@ Git hooks are installed automatically by `pnpm install` (via `core.hooksPath`). 
 | `pnpm run version` | Apply changesets: bump versions, generate changelogs, sync manifests |
 | `pnpm eval:pi` | PI accuracy benchmark (requires model at `~/.sage/models/<schema>/pi-model/`) |
 
+### E2E architecture
+
+The end-to-end tests are split into layers because a single live test was doing two
+unrelated jobs at once — **detection** ("does Sage block canary `diagmark_cmd_…`?") and
+**host wiring** ("does the host actually fire our hook with the expected payload and honor
+our verdict?") — and paying for a real LLM + binary + network to re-prove detection we can
+prove deterministically. Detection is verified without any of that; the live layer is
+reserved for the wiring only it can prove, plus drift.
+
+**Drift is a first-class requirement, not a side effect.** Freezing the host contract into a
+committed fixture trades flakiness for *staleness*: the connector moves on, the fixture stays
+green, and we learn about the break from user bug reports. So the fixture must be continuously
+re-validated against the real host, and divergence must be a loud failure.
+
+**Three layers, each with one job:**
+
+- **Layer 1 — contract (deterministic, every PR, zero setup).** Feed each connector the exact
+  payload a host sends and assert the verdict / response shape. Covers the bulk of detection +
+  the host I/O contract, plus connector behaviors (extra-tool registration, prompt injection)
+  and the **tool-name maps**. No binaries, keys, or network; runs in `pnpm test`.
+- **Layer 2 — live E2E (containerized, scheduled, real agents + Sage).** Run the real agents
+  with Sage inside per-agent containers to (1) verify wiring — the only thing a contract test
+  can't — and (2) re-validate the Layer 1 fixtures against the real host, **failing on diff**
+  (never auto-committing; a real host change opens a PR for human review). See `e2e/README.md`
+  for the harness, per-agent specifics, and the routing model. For claude/opencode/cursor/
+  copilot, the same wiring assertions also run **natively** (`SAGE_E2E_RUNNER=native`, no
+  Docker) against an already-installed, already-authenticated CLI — a convenience mode for
+  local iteration and platforms without Docker (e.g. bare Windows); it does not re-validate
+  drift/tool-catalog fixtures, and it isn't a CI gate. openclaw stays container-only (it's a
+  gateway image, not a standalone binary).
+- **Layer 3 — desktop GUI (macOS / Windows).** The Cursor/VS Code desktop paths (keychain,
+  `Cursor.app`, `Code.exe`) can't run in a Linux container; they run the Extension Host
+  against an installed binary. Real VS Code Copilot **Chat** drift validation also lives here
+  by necessity — headless Chat can't authenticate (interactive GitHub sign-in + entitlement),
+  so it never loads in a container. Native-agent coverage is not yet in place.
+
+**Tool-name drift** is a distinct hazard: an agent renames a tool (`Read`→`read`), drops one,
+or adds one, and the connector's name→canonical map silently stops matching — Sage goes blind
+for that tool. The map keys are Sage's tool-name dependency surface, so they're **pinned in a
+Layer 1 snapshot** (`tool-names-contract.test.ts` per connector) and **verified live in Layer
+2**; where a host exposes a model-free tool catalog (e.g. Claude Code's `system/init`), Layer 2
+diffs advertised names vs the pinned set deterministically. Rule: "model didn't invoke the
+tool" is *inconclusive, never a pass*.
+
+**Settled decisions:** per-agent images on a shared base image; **Sage is bind-mounted at
+runtime, never baked in** (so the current branch — even uncommitted — is what runs); agent
+versions are **pinned in `agents.json`**, updates auto-proposed via PR; one run mode param
+`SAGE_E2E_MODE=pinned|latest` (`pinned` = build at the pinned version, the PR gate; `latest` =
+resolve newest stable host-side, build at it, diff, and route); model-driven agents
+authenticate via **Vertex ADC** (no API keys). The weekly `latest` job runs every agent and
+routes each result through `classifyDrift` (`packages/core/src/e2e-drift-routing.ts`):
+clean version bump → auto-merging PR, payload/code drift → review PR, reproduced red / build
+failure → alarm. The routing table is unit-tested per row.
+
 ### Test Tiers
+
+E2E is organized in two layers (a third, desktop-GUI layer, is partly in place; see below).
+**Layer 1** proves detection + the host I/O contract deterministically, with no binaries,
+keys, or network — it runs in `pnpm test`. **Layer 2** runs the *real* agents with Sage
+inside containers to prove the live wiring (the host fires our hook and honors the verdict)
+and to re-validate the Layer 1 fixtures against the real host (fail on drift). Detection
+logic is **not** re-asserted live — Layer 2's job is wiring + drift, not re-proving Layer 1.
 
 | Tier | Scope | Files | Requires |
 |------|-------|-------|----------|
 | Unit | Core library | `packages/core/src/__tests__/*.test.ts` | dev deps only |
-| Integration | Hook/plugin entry points | `packages/claude-code/src/__tests__/`, `packages/openclaw/src/__tests__/e2e-integration.test.ts`, `packages/opencode/src/__tests__/integration.test.ts` | dev deps only |
-| E2E (Claude Code) | Full plugin in Claude CLI | `packages/claude-code/src/__tests__/e2e.test.ts` | `claude` CLI + `ANTHROPIC_API_KEY` |
-| E2E (OpenClaw) | Full plugin in OpenClaw gateway | `packages/openclaw/src/__tests__/e2e.test.ts` | OpenClaw gateway + `OPENCLAW_GATEWAY_TOKEN` |
-| E2E (OpenCode) | OpenCode CLI smoke test | `packages/opencode/src/__tests__/e2e.test.ts` | OpenCode CLI executable |
-| E2E (Cursor extension) | Sage extension in Cursor Extension Host | `packages/extension/src/__tests__/e2e.test.ts` | Installed Cursor executable (`agent` CLI required for headless Cursor-agent sub-suite) |
-| E2E (VS Code extension) | Sage extension in VS Code Extension Host | `packages/extension/src/__tests__/e2e.test.ts` | Installed VS Code executable |
-| E2E (Copilot CLI) | Sage hooks in Copilot CLI | `packages/extension/src/__tests__/e2e-copilot-cli.test.ts` | `copilot` CLI + GitHub auth |
+| Layer 1 — Contract / integration | Detection + host I/O contract + tool-name maps + connector behaviors (registration, prompt injection), all via mock API | `packages/claude-code/src/__tests__/` (incl. `integration.test.ts`, `*contract*.test.ts`), `packages/openclaw/src/__tests__/e2e-integration.test.ts`, `packages/opencode/src/__tests__/integration.test.ts`, `packages/extension/src/__tests__/integration.test.ts` + `tool-names-contract.test.ts` | dev deps only |
+| Layer 2 — Containerized live E2E | Real agent + Sage in Docker; canary-deny wiring + payload/tool-name drift | `packages/{claude-code,openclaw,opencode}/src/__tests__/e2e.test.ts`, `packages/extension/src/__tests__/e2e-copilot-cli.test.ts`, the Cursor-headless + VS Code-container blocks of `packages/extension/src/__tests__/e2e.test.ts` | Docker + `e2e/.env`; run via `e2e/run.sh <agent>` |
+| Layer 2 — Native live E2E | Same canary-deny wiring assertions, no Docker; drift/tool-catalog checks stay container-only | Same files as above, minus `openclaw` (container-only) | An installed, already-authenticated CLI (claude, opencode, cursor-agent, or copilot); run via `SAGE_E2E_RUNNER=native pnpm test:e2e:<agent>` |
+| Layer 3 — Desktop GUI | Sage extension in an installed Cursor / VS Code Extension Host (keychain, executable discovery) | Block A of `packages/extension/src/__tests__/e2e.test.ts` | Installed Cursor / VS Code binary; run via `pnpm test:e2e:cursor` / `:vscode` |
 
-`pnpm test` runs unit and integration tests. E2E is excluded — run separately with `pnpm test:e2e` or the per-platform variants.
+`pnpm test` runs unit + Layer 1 (integration). Layer 2 is excluded — run with `e2e/run.sh
+<agent>` (containerized) or, for claude/opencode/cursor/copilot, natively via
+`SAGE_E2E_RUNNER=native pnpm test:e2e:<agent>` (no Docker; openclaw has no native path — it's
+a gateway image, not a standalone binary). Both modes are gated on `SAGE_E2E_RUNNER`
+(`container` or `native`) and skip otherwise. Native mode reuses whatever auth the installed
+CLI already has (no `e2e/.env`/Vertex needed), isolates to a temp HOME, and is scoped to the
+wiring assertions — not the drift/tool-catalog checks, which remain container-only. See
+`e2e/README.md`'s "Run natively" section for prerequisites and Windows notes. The desktop
+Extension Host suite (Layer 3) still runs against an installed binary and is partly covered
+in Layer 2 for VS Code (wiring-only, under Xvfb); Cursor's Extension Host has no container
+equivalent. Native macOS/Windows *desktop GUI* coverage is not yet in place (distinct from the
+Layer 2 native CLI mode above).
 
 ### Regression Baselines
 
@@ -204,104 +271,114 @@ Review the diff in `packages/core/src/__tests__/fixtures/decision-snapshot.json`
 
 ### Dummy Canary Rules
 
-E2E tests use dummy canary rules (`threats/dummy.yaml`) instead of real threat patterns. The canary rules match harmless, highly-specific marker strings (e.g. `__sage_test_deny_cmd_a75bf229__`) that would never appear in real usage. This avoids AI models self-refusing "dangerous-looking" prompts before Sage gets a chance to intercept them. Canary rules are included in all distribution packages alongside real threat definitions.
+E2E tests use dummy canary rules (`threats/dummy.yaml`) instead of real threat patterns. The canary rules match harmless, highly-specific marker strings (e.g. `diagmark_cmd_a75bf229`) that would never appear in real usage. The markers are deliberately **opaque** — they carry no "this is a security test" cue in the payload itself (the rule `id`/`title` hold the human-readable meaning). A self-describing token like `__sage_test_deny_cmd_…` reads as a security probe, and a safety-trained model that has been given security context — notably OpenCode, whose connector injects Sage's session-scan findings into the prompt — will refuse to run it, so the artifact never reaches Sage and the deny/ask test can't fire. Opaque markers run as rote yet stay unique, so false positives remain essentially impossible. The same set is shared by every agent's E2E suite and is included in all distribution packages alongside real threat definitions.
 
 ### E2E Setup
 
-#### Claude Code
+#### Layer 2 — containerized live E2E
 
-**Prerequisites:** `claude` CLI in PATH, valid `ANTHROPIC_API_KEY`, and Sage must **not** be installed via the Claude Code marketplace (duplicate-plugin conflict with `--plugin-dir`).
+All six agents (claude, copilot, opencode, cursor, openclaw, vscode) run the same way: a
+per-agent image built on a shared base, with current-branch Sage **bind-mounted** at runtime
+(never baked in), driven via `docker compose`. The harness lives under `e2e/` — see
+`e2e/README.md` for the full reference (`run.sh`, `compose.yml`, `agents.json`, the resolver,
+and the drift-routing model). The test logic (parsing, assertions, JUnit) runs on the host;
+the container is only the agent sandbox.
 
 ```bash
-pnpm build
-claude --plugin-dir .
+pnpm build                 # globalSetup also builds, but build once up front
+e2e/run.sh claude          # one agent
+e2e/run.sh all             # every agent
 ```
 
-#### Cursor / VS Code
+**Prerequisites:** Docker + a populated `e2e/.env` (copy `e2e/.env.example`). The suites are
+gated on `SAGE_E2E_RUNNER=container` (set by `run.sh`); running `pnpm test:e2e:*` directly
+without it skips. Auth per agent, injected via `e2e/.env`:
 
-The extension E2E tests run inside a real Extension Host process using installed IDE binaries.
+| Agent(s) | Auth | Notes |
+|----------|------|-------|
+| claude, opencode, openclaw | **Vertex ADC** (no API key) | `CLAUDE_CODE_USE_VERTEX=1` + project/region; ADC from the GCE metadata server (CI) or a mounted ADC file locally. openclaw reaches Gemini via the same Vertex project. **No `ANTHROPIC_API_KEY` / `GEMINI_API_KEY`.** |
+| copilot | GitHub token (`GITHUB_TOKEN`) | Copilot-entitled token |
+| cursor | `CURSOR_API_KEY` | Cursor's own backend (no Vertex) |
+| vscode | none | wiring-only suite under Xvfb; no model/auth |
 
-**Prerequisites:**
+Model overrides (optional): `SAGE_E2E_MODEL` (claude), `OPENCODE_E2E_MODEL`,
+`COPILOT_E2E_MODEL`, `OPENCLAW_E2E_MODEL`, `SAGE_HEADLESS_AGENT_MODEL` (cursor).
 
-- Cursor E2E: installed Cursor executable
-- Cursor headless agent E2E: `agent` CLI in `PATH` (or `SAGE_AGENT_PATH`), authenticated via `agent login` or `CURSOR_API_KEY`
-- VS Code E2E: installed VS Code executable
-- Extension must be built (handled by Vitest `globalSetup`)
+OpenClaw is the one cross-repo case: it is **not** built on our base — the suite consumes the
+official OpenClaw image (`OPENCLAW_IMAGE`, kept in the gitignored `e2e/.env`)
+and owns the gateway lifecycle itself (`compose up -d` → poll `/health` → drive over HTTP →
+`down`). No `~/.openclaw/openclaw.json` setup is needed; the container entrypoint enables the
+chat-completions endpoint and sets the token.
+
+#### Layer 2 — native live E2E (no Docker)
+
+The same claude/opencode/cursor/copilot suites also run directly against an already-installed
+binary — no Docker, no `e2e/.env`. Useful for fast local iteration or a machine without
+Docker/WSL2 (e.g. bare Windows). openclaw has no native path — it's a gateway image, not a
+standalone binary — and stays container-only.
+
+```bash
+SAGE_E2E_RUNNER=native pnpm test:e2e:claude
+SAGE_E2E_RUNNER=native pnpm test:e2e:opencode
+SAGE_E2E_RUNNER=native pnpm test:e2e:cursor
+SAGE_E2E_RUNNER=native pnpm test:e2e:copilot-cli
+```
+
+**Prerequisites:** the corresponding CLI installed and already authenticated exactly as you'd
+normally use it — no separate auth setup. Each suite resolves the binary from PATH (or an env
+override — `SAGE_CLAUDE_PATH`, `SAGE_OPENCODE_PATH`/`OPENCODE_E2E_BIN`,
+`SAGE_CURSOR_AGENT_PATH`/`SAGE_AGENT_PATH`, `SAGE_COPILOT_PATH`) and skips cleanly with a
+`console.warn` if it isn't found — never a hard failure.
+
+**Isolation + auth:** every native run is isolated to a fresh temp `HOME` (never your real
+`~/.sage`, `~/.cursor`, or `~/.copilot`) while still reusing your ambient login — each
+connector copies forward only the specific auth file it needs (opencode's
+`~/.config/opencode/model.json`, copilot's `~/.copilot/config.json`) rather than the whole
+real `HOME`. Cursor and copilot also always symlink the real `~/Library` into the isolated
+HOME on macOS, regardless of any env-var key — both touch the keychain unconditionally
+(cursor for its own session bookkeeping; copilot to resolve the token behind the copied
+config's logged-in-user reference). Without `~/Library`, cursor pops a "Keychain Not Found"
+dialog, and copilot falls back to inferring the GitHub host from the current repo's git
+remote — which fails outright if that remote is an internal GHE mirror rather than
+github.com (confirmed on an internally-mirrored repo). **claude is the exception**: if
+`~/.claude/.credentials.json` doesn't exist (keychain-based auth, common on macOS), the suite
+falls back to running against your **real** `~/.claude` instead of an isolated one — a
+keychain session can't be relocated to a temp HOME. Prefer env-var auth (`ANTHROPIC_API_KEY`,
+Vertex, or your usual corporate proxy vars) if you want full isolation.
+
+**Known limitation (confirmed on a managed install):** if `claude` already has Sage installed
+from the plugin marketplace **and** enterprise/managed settings pin the plugin list, Claude
+Code silently ignores `--plugin-dir` and loads the cached marketplace version instead of your
+current branch — a Claude Code policy decision, not something Sage can work around. The native
+claude suite detects this (`plugin_errors` on `system/init`) and fails loudly with an explicit
+message instead of silently testing the wrong plugin version. Container mode is unaffected (no
+pre-installed marketplace plugin in the image to conflict with).
+
+**Scope + Windows:** native mode restores only the original wiring assertions (benign-allow +
+canary-deny) — the drift-diff and tool-catalog-drift checks stay container-only, since the
+capture sink they read from is never wired up outside a container. No version pinning either
+(unlike the Docker images, native mode runs whatever version you have installed). This is also
+the **first Windows-facing E2E code path in this project** — no Windows E2E CI has ever
+existed for any layer (including the GUI Layer 3 above), so treat it as newer/less
+battle-tested than the container path and verify locally on Windows before relying on it there.
+
+#### Layer 3 — desktop Extension Host (Cursor / VS Code)
+
+Block A of `packages/extension/src/__tests__/e2e.test.ts` drives the Sage extension inside an
+installed Cursor / VS Code Extension Host (keychain, executable discovery) — the desktop path
+that can't run headless in a Linux container. It runs against a locally-installed binary and
+skips where none is found. VS Code additionally has a wiring-only Layer 2 container path (under
+Xvfb). Native macOS/Windows agents for the full desktop matrix are not yet in place.
+
+**Run:** `pnpm test:e2e:cursor` / `pnpm test:e2e:vscode` (extension built by Vitest `globalSetup`).
 
 **Optional executable overrides:**
 
 | Variable | Description |
 |----------|-------------|
 | `SAGE_CURSOR_PATH` | Absolute path to the Cursor executable |
-| `SAGE_AGENT_PATH` | Absolute path to the `agent` CLI used by Cursor headless E2E |
 | `SAGE_VSCODE_PATH` | Absolute path to the VS Code executable |
 | `VSCODE_EXECUTABLE_PATH` | Alternate VS Code executable override |
-
-If a requested host executable is unavailable, that host's E2E suite is skipped. If `agent` is unavailable or unauthenticated, the Cursor headless agent sub-suite is skipped and remaining Cursor host E2E tests still run.
-
-#### Copilot CLI
-
-The Copilot CLI E2E tests load Sage as a plugin via `--plugin-dir` and verify that Copilot CLI respects hook verdicts. No changes are made to the real `~/.copilot/` directory.
-
-**Prerequisites:**
-
-- `copilot` CLI in PATH (install via [GitHub Copilot CLI docs](https://docs.github.com/copilot/how-tos/copilot-cli))
-- Authenticated: `copilot login`, or set `GITHUB_TOKEN` / `GH_TOKEN` / `COPILOT_GITHUB_TOKEN`
-
-The suite auto-skips if `copilot` is not in PATH. It does **not** detect missing auth — if the CLI is present but not authenticated, tests will fail with auth errors rather than skipping.
-
-**Optional environment variables:**
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `COPILOT_E2E_MODEL` | `claude-haiku-4.5` | Model to use for E2E tests |
-
-#### OpenClaw
-
-**Prerequisites:** A running OpenClaw gateway with Sage installed. The tests read `~/.openclaw/openclaw.json` for the auth token and check that the chat completions endpoint is enabled. Tests skip automatically if either is missing.
-
-Enable the endpoint in `~/.openclaw/openclaw.json`:
-
-```json
-{
-  "gateway": {
-    "http": {
-      "endpoints": {
-        "chatCompletions": { "enabled": true }
-      }
-    }
-  }
-}
-```
-
-**Optional environment variables:**
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `OPENCLAW_GATEWAY_TOKEN` | read from `~/.openclaw/openclaw.json` | Override the gateway auth token |
-| `OPENCLAW_E2E_HOST` | `http://localhost:18789` | Gateway URL |
-| `OPENCLAW_E2E_MODEL` | `claude-3-5-haiku-latest` | Model to use |
-
-**Running the gateway with Docker:**
-
-Use OpenClaw's `OPENCLAW_EXTRA_MOUNTS` to mount the built Sage plugin into the gateway container. Set the variable before running `docker-setup.sh`, which generates `docker-compose.extra.yml` with the mount:
-
-```bash
-# Build Sage first
-pnpm build
-
-# Set the mount and run setup (generates docker-compose.extra.yml)
-export OPENCLAW_EXTRA_MOUNTS="SAGE_PROJECT_DIR/packages/openclaw:/home/node/.openclaw/extensions/sage:ro"
-./docker-setup.sh
-
-# If the gateway is already set up, re-run docker-setup.sh to regenerate
-# the extra compose file, then restart:
-docker compose up -d
-```
-
-This mounts the built `packages/openclaw/` directory into the gateway's extensions directory where plugin discovery finds it. See the [OpenClaw Docker guide](https://docs.openclaw.ai/install/docker) for details.
-
-**Tip:** Disable the security awareness skill on the gateway agent during E2E testing. The skill teaches the model to recognise dangerous patterns, which can cause it to self-refuse commands instead of calling the tool and letting Sage's `before_tool_call` hook handle them.
 
 ### Project Layout
 

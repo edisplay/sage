@@ -1,0 +1,29 @@
+{
+	"vscode": {
+		"run_in_terminal": "Bash",
+		"bash": "Bash",
+		"write_bash": "Bash",
+		"create_file": "Write",
+		"create": "Write",
+		"replace_string_in_file": "Edit",
+		"insert_edit_into_file": "Edit",
+		"edit": "Edit",
+		"multi_replace_string_in_file": "Edit",
+		"apply_patch": "ApplyPatch",
+		"read_file": "Read",
+		"view": "Read",
+		"grep": "Grep",
+		"fetch_webpage": "WebFetch",
+		"web_fetch": "WebFetch",
+		"Bash": "Bash",
+		"Write": "Write",
+		"Read": "Read",
+		"Edit": "Edit",
+		"Grep": "Grep",
+		"WebFetch": "WebFetch"
+	},
+	"cursor": {
+		"Shell": "Bash"
+	},
+	"copilotCliToolNames": ["Bash", "Write", "Read", "Edit", "Grep", "WebFetch"]
+}

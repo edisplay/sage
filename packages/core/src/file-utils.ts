@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as fsPromises from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 
 // OpenClaw's static analysis flags direct readFile/readFileSync calls in bundles
 // that also use HTTP, as a potential data-exfiltration pattern. Since Sage only
@@ -162,5 +163,54 @@ async function pruneOrphanedModelDownloads(
 		} catch {
 			// Best-effort
 		}
+	}
+}
+
+async function removeStaleFileLock(lockPath: string, staleAgeMs: number): Promise<void> {
+	try {
+		const s = await fsPromises.stat(lockPath);
+		if (Date.now() - s.mtimeMs < staleAgeMs) return;
+		await fsPromises.rmdir(lockPath);
+	} catch {
+		// Missing or raced lock cleanup is OK; the next acquire attempt decides.
+	}
+}
+
+async function acquireFileLock(
+	filePath: string,
+	timeoutMs: number = 250,
+	staleAgeMs: number = 30000,
+): Promise<(() => Promise<void>) | undefined> {
+	const lockPath = `${filePath}.lock`;
+	const deadline = Date.now() + timeoutMs;
+
+	while (true) {
+		try {
+			await fsPromises.mkdir(lockPath);
+			return async () => {
+				try {
+					await fsPromises.rmdir(lockPath);
+				} catch {
+					// Fail-open: lock cleanup errors must not affect logging.
+				}
+			};
+		} catch {
+			await removeStaleFileLock(lockPath, staleAgeMs);
+			const remainingMs = deadline - Date.now();
+			if (remainingMs <= 0) return undefined;
+			await sleep(Math.min(50, remainingMs)); // 50ms poll interval
+		}
+	}
+}
+
+export async function withFileLock(filePath: string, callback: () => Promise<void>) {
+	const release = await acquireFileLock(filePath);
+
+	if (!release) return;
+
+	try {
+		return await callback();
+	} finally {
+		await release();
 	}
 }

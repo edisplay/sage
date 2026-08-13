@@ -99,7 +99,7 @@ Reports audit entries as false positives to Sage Proxy (`POST /v2/fp-report`).
 - **Entry selection**: callers should call `sage_list_audit_entries` first and pass the relevant `entry_id`(s) via the `entry_ids` parameter.
   - With `entry_ids` provided: at most **10** entries per call. Larger arrays are rejected with an actionable error.
   - With `entry_ids` omitted (fallback): `allow` verdicts are filtered out and only the **3** most recent `deny` / `ask` entries for the conversation are submitted, to avoid flooding the backend with unrelated verdicts.
-- **Payload**: one report per audit entry, shaped like the Sage FP Submit Structure. The structured `content` field stored on the audit entry is forwarded verbatim — the tool does not reconstruct content from the truncated `tool_input_summary`.
+- **Payload**: one report per audit entry, shaped like the Sage FP Submit Structure. It includes standard Sage context (runtime/platform metadata plus current Sage protection settings). The structured `content` field stored on the audit entry is forwarded verbatim — the tool does not reconstruct content from the truncated `tool_input_summary`.
 
 ## Configuration
 

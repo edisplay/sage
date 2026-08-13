@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../detection-telemetry.js", () => ({
-	sendCommunityIqDetection: vi.fn().mockResolvedValue(undefined),
+	sendCommunityIqTelemetry: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { evaluateToolCall } from "../evaluator.js";

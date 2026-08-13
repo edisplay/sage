@@ -246,3 +246,188 @@ describe("sage-statusline cleanup", () => {
 		expect(readSettings(tmpHome)).toHaveProperty("statusLine");
 	}, 10_000);
 });
+
+describe("sage-statusline skill verdict display", () => {
+	let tmpHome: string;
+	const SESSION_START_ISO = new Date(Date.now() - 60_000).toISOString();
+
+	beforeEach(async () => {
+		tmpHome = await makeTmpDir();
+		setupHome(tmpHome, { pluginInstalled: true, pluginEnabled: true, statusLine: true });
+	});
+
+	function writeStatusFile(sessionId: string, status: Record<string, unknown>): void {
+		mkdirSync(join(tmpHome, ".sage"), { recursive: true });
+		writeFileSync(
+			join(tmpHome, ".sage", `statusline-${sessionId}.txt`),
+			JSON.stringify({ denied: 0, flagged: 0, ...status }),
+		);
+	}
+
+	function writeVerdictCache(content: string): void {
+		mkdirSync(join(tmpHome, ".sage"), { recursive: true });
+		writeFileSync(join(tmpHome, ".sage", "skill_verdict_cache.json"), content);
+	}
+
+	function cacheWith(
+		verdict: string,
+		analyzedAt: string,
+		summary: string,
+		skillName?: string,
+		sources?: Array<{ agent_runtime?: string; container_key?: string }>,
+	): string {
+		return JSON.stringify({
+			schema_version: 1,
+			entries: {
+				["a".repeat(64)]: {
+					verdict,
+					summary,
+					skill_name: skillName,
+					sources,
+					analyzed_at: analyzedAt,
+				},
+			},
+		});
+	}
+
+	it("shows a fresh risky verdict that arrived during the session", async () => {
+		writeStatusFile("sess1", { startedAt: SESSION_START_ISO });
+		writeVerdictCache(
+			cacheWith("CRITICAL", new Date().toISOString(), "Exfiltrates SSH keys", "ssh-stealer"),
+		);
+
+		const { stdout, code } = await runStatusLine({ session_id: "sess1" }, { HOME: tmpHome });
+
+		expect(code).toBe(0);
+		expect(stdout).toContain("⚠️");
+		expect(stdout).toContain("1 malicious skill (ssh-stealer)");
+	}, 10_000);
+
+	it("includes the skill name in the warning", async () => {
+		writeStatusFile("sess1", { startedAt: SESSION_START_ISO });
+		writeVerdictCache(
+			cacheWith("CRITICAL", new Date().toISOString(), "Exfiltrates SSH keys", "evil-skill"),
+		);
+
+		const { stdout, code } = await runStatusLine({ session_id: "sess1" }, { HOME: tmpHome });
+
+		expect(code).toBe(0);
+		expect(stdout).toContain("1 malicious skill (evil-skill)");
+	}, 10_000);
+
+	it("lists multiple risky skill names, newest first", async () => {
+		writeStatusFile("sess1", { startedAt: SESSION_START_ISO });
+		const older = new Date(Date.now() - 2_000).toISOString();
+		const newer = new Date().toISOString();
+		writeVerdictCache(
+			JSON.stringify({
+				schema_version: 1,
+				entries: {
+					["a".repeat(64)]: { verdict: "CRITICAL", skill_name: "older-skill", analyzed_at: older },
+					["b".repeat(64)]: { verdict: "HIGH", skill_name: "newer-skill", analyzed_at: newer },
+				},
+			}),
+		);
+
+		const { stdout, code } = await runStatusLine({ session_id: "sess1" }, { HOME: tmpHome });
+
+		expect(code).toBe(0);
+		expect(stdout).toContain("2 malicious skills (newer-skill, older-skill)");
+	}, 10_000);
+
+	it("hides a verdict discovered only by another agent, but shows its own", async () => {
+		writeStatusFile("sess1", { startedAt: SESSION_START_ISO });
+		writeVerdictCache(
+			cacheWith("CRITICAL", new Date().toISOString(), "bad skill", "evil-skill", [
+				{ agent_runtime: "cursor", container_key: "skill:evil-skill@local" },
+			]),
+		);
+		const foreign = await runStatusLine({ session_id: "sess1" }, { HOME: tmpHome });
+		expect(foreign.stdout).not.toContain("⚠️");
+		expect(foreign.stdout).toContain("✅");
+
+		writeVerdictCache(
+			cacheWith("CRITICAL", new Date().toISOString(), "bad skill", "evil-skill", [
+				{ agent_runtime: "cursor" },
+				{ agent_runtime: "claude-code" },
+			]),
+		);
+		const local = await runStatusLine({ session_id: "sess1" }, { HOME: tmpHome });
+		expect(local.stdout).toContain("1 malicious skill (evil-skill)");
+		expect(local.stdout).not.toContain("Cursor");
+	}, 15_000);
+
+	it("reverts to base output once the verdict ages past the display window", async () => {
+		// Analyzed during the session, but longer ago than the 10s display window.
+		const analyzedAt = new Date(Date.now() - 30_000).toISOString();
+		writeStatusFile("sess1", { startedAt: SESSION_START_ISO });
+		writeVerdictCache(cacheWith("CRITICAL", analyzedAt, "already-shown finding"));
+
+		const { stdout, code } = await runStatusLine({ session_id: "sess1" }, { HOME: tmpHome });
+
+		expect(code).toBe(0);
+		expect(stdout).not.toContain("⚠️");
+		expect(stdout).toContain("✅");
+	}, 10_000);
+
+	it("ignores verdicts analyzed before the session started", async () => {
+		writeStatusFile("sess1", { startedAt: SESSION_START_ISO });
+		writeVerdictCache(
+			cacheWith("CRITICAL", new Date(Date.now() - 120_000).toISOString(), "old finding"),
+		);
+
+		const { stdout, code } = await runStatusLine({ session_id: "sess1" }, { HOME: tmpHome });
+
+		expect(code).toBe(0);
+		expect(stdout).not.toContain("⚠️");
+		expect(stdout).toContain("✅");
+	}, 10_000);
+
+	it("falls back to base output on a corrupt verdict cache", async () => {
+		writeStatusFile("sess1", { startedAt: SESSION_START_ISO });
+		writeVerdictCache("{ not json");
+
+		const { stdout, code } = await runStatusLine({ session_id: "sess1" }, { HOME: tmpHome });
+
+		expect(code).toBe(0);
+		expect(stdout).not.toContain("⚠️");
+		expect(stdout).toContain("✅");
+	}, 10_000);
+
+	it("falls back to base output when the verdict cache is missing", async () => {
+		writeStatusFile("sess1", { startedAt: SESSION_START_ISO });
+
+		const { stdout, code } = await runStatusLine({ session_id: "sess1" }, { HOME: tmpHome });
+
+		expect(code).toBe(0);
+		expect(stdout).not.toContain("⚠️");
+		expect(stdout).toContain("✅");
+	}, 10_000);
+
+	it("shows base output for old status files without startedAt", async () => {
+		writeStatusFile("sess1", { denied: 1, lastReason: "test", lastCategory: "test" });
+		writeVerdictCache(cacheWith("CRITICAL", new Date().toISOString(), "fresh finding"));
+
+		const { stdout, code } = await runStatusLine({ session_id: "sess1" }, { HOME: tmpHome });
+
+		expect(code).toBe(0);
+		expect(stdout).not.toContain("⚠️");
+		expect(stdout).toContain("blocked");
+	}, 10_000);
+
+	it("shows base output when skill_check is disabled", async () => {
+		mkdirSync(join(tmpHome, ".sage"), { recursive: true });
+		writeFileSync(
+			join(tmpHome, ".sage", "config.json"),
+			JSON.stringify({ skill_check: { enabled: false } }),
+		);
+		writeStatusFile("sess1", { startedAt: SESSION_START_ISO });
+		writeVerdictCache(cacheWith("CRITICAL", new Date().toISOString(), "fresh finding"));
+
+		const { stdout, code } = await runStatusLine({ session_id: "sess1" }, { HOME: tmpHome });
+
+		expect(code).toBe(0);
+		expect(stdout).not.toContain("⚠️");
+		expect(stdout).toContain("✅");
+	}, 10_000);
+});

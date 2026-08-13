@@ -15,18 +15,49 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import {
+	foreignSourceRuntime,
 	formatStatusLine,
 	getClaudeConfigDir,
 	isPluginInstalledSync,
 	loadConfigSync,
+	loadSkillVerdictCacheSync,
 	resolveBranding,
 	resolvePath,
+	riskyVerdictsSince,
+	type SkillWarning,
 	sanitizeSessionId,
 } from "@gendigital/sage-core";
 import { STATUSLINE_MARKER } from "./constants.js";
 
 const STATUS_PREFIX = "statusline-";
 const STATUS_SUFFIX = ".txt";
+
+/**
+ * How long a fresh skill verdict stays on the status line. Claude Code re-runs
+ * this script every 5s (the refreshInterval registered by session-start), so
+ * 2× that guarantees every verdict is rendered at least once — at the cost of
+ * occasionally surviving a second refresh. Stateless on purpose: verdicts age
+ * out of the window naturally, no shown-state file needed.
+ */
+const SKILL_WARNING_WINDOW_MS = 10_000;
+
+/**
+ * Resolve the skill warning to display: HIGH/CRITICAL verdicts analyzed within
+ * the last {@link SKILL_WARNING_WINDOW_MS} (and after session start). Once a
+ * verdict ages past the window the base status returns.
+ */
+function resolveSkillWarning(startedAt: string): SkillWarning | undefined {
+	const windowStart = new Date(Date.now() - SKILL_WARNING_WINDOW_MS).toISOString();
+	const laterIso = startedAt > windowStart ? startedAt : windowStart;
+	const risky = riskyVerdictsSince(loadSkillVerdictCacheSync(), laterIso).filter(
+		(v) => !foreignSourceRuntime(v.sources, "claude-code"),
+	);
+	if (risky.length === 0) return undefined;
+	const names = risky
+		.map((v) => v.skillName?.trim())
+		.filter((n): n is string => n !== undefined && n !== "");
+	return { count: risky.length, names };
+}
 
 function getPluginName(): string | null {
 	try {
@@ -158,9 +189,19 @@ function main(): void {
 			flagged?: number;
 			lastReason?: string | null;
 			lastCategory?: string | null;
+			startedAt?: string;
 		};
+
+		let skillWarning: SkillWarning | undefined;
+		if (config.skill_check.enabled && data.startedAt) {
+			try {
+				skillWarning = resolveSkillWarning(data.startedAt);
+			} catch {
+				// Fail open — base status only
+			}
+		}
 		process.stdout.write(
-			`${formatStatusLine(data.denied ?? 0, data.flagged ?? 0, data.lastReason, data.lastCategory, branding)}\n`,
+			`${formatStatusLine(data.denied ?? 0, data.flagged ?? 0, data.lastReason, data.lastCategory, branding, skillWarning)}\n`,
 		);
 	} catch {
 		// Status file missing — either session-start hasn't created it yet

@@ -1,0 +1,287 @@
+# Sage E2E — containerized agents (Layer 2; see e2e/README.md).
+#
+# The vitest suite runs on the HOST and drives these containers via
+# `docker compose run`. The container is only the agent sandbox; all test logic
+# (parsing, assertions, JUnit) stays in vitest. Sage is bind-mounted (current
+# branch, even uncommitted), never baked into the image.
+
+# --- Reusable fragments (anchors) shared across services. Service-specific env and
+# volumes stay inline in each service so their per-service rationale keeps its locality. ---
+
+# Drift loop: tell the in-container Sage to capture each raw + normalized hook
+# payload here. The dir is bind-mounted from the host (x-capture-volume), so the host
+# vitest suite reads the captures back and diffs them against the committed Layer 1
+# fixtures. Each connector namespaces its files (pre/post-*, vscode-*, opencode-*,
+# openclaw-*) so they can't collide. Unset in production → no capture.
+x-capture-env: &capture-env
+  SAGE_E2E_CAPTURE_DIR: /capture
+
+# Vertex AI auth (Google ADC). In CI on a GCE VM the attached service account is read from
+# the metadata server, so leave SAGE_E2E_GCP_ADC unset and this resolves empty. For LOCAL
+# Vertex it points at your gcloud ADC file (mounted via x-adc-volume below).
+x-vertex-adc-env: &vertex-adc-env
+  GOOGLE_APPLICATION_CREDENTIALS: ${SAGE_E2E_GCP_ADC:+/gcp/adc.json}
+
+# Writable capture sink shared with the host (root-owned on Linux; the host reads/clears it).
+x-capture-volume: &capture-volume ./output/capture:/capture
+
+# Optional local ADC mount. Unset (CI) → /dev/null no-op (metadata server); set
+# (local) → your gcloud ADC, read-only.
+x-adc-volume: &adc-volume ${SAGE_E2E_GCP_ADC:-/dev/null}:/gcp/adc.json:ro
+
+services:
+  claude:
+    build:
+      context: .
+      dockerfile: agents/claude/Dockerfile
+      args:
+        CLAUDE_VERSION: ${CLAUDE_VERSION:-2.1.169}
+        NPM_REGISTRY: ${NPM_REGISTRY:-}
+    image: sage-e2e-claude:${CLAUDE_VERSION:-2.1.169}
+    # Container-mode auth is Vertex ADC only — no ANTHROPIC_API_KEY (see the vertex-adc-env
+    # anchor above). This file holds the Vertex project/region vars locally; in CI the
+    # pipeline writes it from project params. Gitignored.
+    env_file:
+      - .env
+    environment:
+      <<: [*capture-env, *vertex-adc-env]
+      HOME: /work
+    working_dir: /work
+    entrypoint: ["claude"]
+    volumes:
+      # Repo root → /sage (the --plugin-dir target). Read-only: the container
+      # must never mutate the working tree.
+      - ..:/sage:ro
+      - *adc-volume
+      - *capture-volume
+    tmpfs:
+      # Writable, ephemeral cwd + HOME (~/.sage runtime state).
+      - /work
+
+  copilot:
+    build:
+      context: .
+      dockerfile: agents/copilot/Dockerfile
+      args:
+        COPILOT_VERSION: ${COPILOT_VERSION:-1.0.63}
+        NPM_REGISTRY: ${NPM_REGISTRY:-}
+    image: sage-e2e-copilot:${COPILOT_VERSION:-1.0.63}
+    # GitHub/Copilot auth (GITHUB_TOKEN / GH_TOKEN / COPILOT_GITHUB_TOKEN) lives
+    # here locally; in CI the pipeline writes this file from a secret.
+    env_file:
+      - .env
+    environment:
+      # HOME is the image's /work (NOT a tmpfs, unlike claude): the copilot CLI is a
+      # loader that downloads a native runtime addon into $HOME/.cache on first run,
+      # and Docker mounts tmpfs `noexec` by default, so the addon can't be mapped.
+      # Keeping HOME on the image overlay (a) is exec-able and (b) reuses the runtime
+      # cache pre-warmed by `copilot --version` at build time. `--rm` discards the
+      # writable layer after each run, so it stays ephemeral.
+      HOME: /work
+      # Copilot is NOT MCP-based — it routes through the sage-hook CJS hook (vscode
+      # mode), which writes the namespaced vscode-*.jsonl captures (see x-capture-env).
+      <<: *capture-env
+    working_dir: /work
+    entrypoint: ["copilot"]
+    volumes:
+      # Repo root → /sage (read-only). The generated plugin's hooks.json points
+      # at /sage/packages/extension/dist/sage-hook.cjs and the hook resolves its
+      # bundled threats/trusted-domains from /sage/packages/extension/resources.
+      - ..:/sage:ro
+      - *capture-volume
+      # Writable scratch for the generated --plugin-dir (plugin.json + hooks.json).
+      # The host vitest suite writes it before driving copilot.
+      - ./output/copilot-plugin:/plugin
+      # Sage runtime state (~/.sage = /work/.sage, since HOME=/work). Bind-mounted so
+      # the host can read audit.jsonl back and assert the recorded verdict for real
+      # (full parity — no more no-op audit check in container).
+      - ./output/copilot-sage:/work/.sage
+
+  opencode:
+    build:
+      context: .
+      dockerfile: agents/opencode/Dockerfile
+      args:
+        OPENCODE_VERSION: ${OPENCODE_VERSION:-1.17.8}
+        NPM_REGISTRY: ${NPM_REGISTRY:-}
+    image: sage-e2e-opencode:${OPENCODE_VERSION:-1.17.8}
+    # Run as the host user (run.sh exports SAGE_E2E_UID/GID) so files written into the
+    # bind-mounted HOME (~/.sage, plugin scan cache) are host-owned — the host vitest
+    # suite can read AND delete them between tests (full parity). Defaults to root if
+    # unset (e.g. raw `docker compose run`); on Linux that leaves root-owned files.
+    user: "${SAGE_E2E_UID:-0}:${SAGE_E2E_GID:-0}"
+    # Auth lives here locally; in CI the pipeline writes this file from a secret.
+    # OpenCode is model-agnostic — it authenticates to Claude via Google
+    # Vertex AI (provider google-vertex-anthropic), reusing the same ADC + project/
+    # region vars as the claude service. NO ANTHROPIC_API_KEY.
+    env_file:
+      - .env
+    environment:
+      # HOME is a host bind mount (below), NOT a tmpfs: the opencode CLI is a loader
+      # that downloads a native binary into HOME on first run, and Docker mounts tmpfs
+      # `noexec` by default (the copilot lesson). A host bind mount is exec-able AND
+      # lets the host read back ~/.sage (audit/scan caches) for full-parity assertions.
+      <<: [*capture-env, *vertex-adc-env]
+      HOME: /work
+    working_dir: /work
+    entrypoint: ["opencode"]
+    volumes:
+      # Repo root → /sage (read-only). opencode.json points the plugin at
+      # /sage/packages/opencode; the plugin resolves its bundled threats/trusted-
+      # domains and the MCP server (dist/mcp-server.cjs) from there.
+      - ..:/sage:ro
+      - *adc-volume
+      - *capture-volume
+      # Full-parity HOME bind mount: the host vitest suite writes opencode.json +
+      # ~/.sage/config.json here before driving opencode, and reads ~/.sage (audit log,
+      # plugin-scan cache) back after. Exec-able, so the native binary maps fine.
+      - ./output/opencode-home:/work
+
+  cursor:
+    build:
+      context: .
+      dockerfile: agents/cursor/Dockerfile
+      args:
+        CURSOR_VERSION: ${CURSOR_VERSION:-2026.06.19-20-24-33-653a7fb}
+    image: sage-e2e-cursor:${CURSOR_VERSION:-2026.06.19-20-24-33-653a7fb}
+    # Run as the host user (run.sh exports SAGE_E2E_UID/GID) so files written into the
+    # bind-mounted HOME (~/.sage, plugin scan cache) are host-owned — the host vitest
+    # suite can read AND delete them between tests (full parity). Defaults to root if
+    # unset (e.g. raw `docker compose run`); on Linux that leaves root-owned files.
+    user: "${SAGE_E2E_UID:-0}:${SAGE_E2E_GID:-0}"
+    # CURSOR_API_KEY lives here locally; in CI the pipeline writes this file from a
+    # secret. Unlike claude/opencode/openclaw, the Cursor `agent` CLI routes
+    # through Cursor's OWN backend (model alias resolved server-side) — it cannot use
+    # Vertex ADC, so NO *vertex-adc-env / *adc-volume here.
+    env_file:
+      - .env
+    environment:
+      # HOME is a host bind mount (below), NOT a tmpfs: cursor-agent caches into HOME on
+      # first run and Docker mounts tmpfs `noexec` by default (the copilot/opencode
+      # lesson). A host bind mount is exec-able AND lets the host read back ~/.sage
+      # (audit log) for full-parity assertions. Cursor is NOT MCP-based — it routes
+      # through the sage-hook CJS hook (cursor mode), which writes the namespaced
+      # cursor-*.jsonl captures (see x-capture-env).
+      <<: *capture-env
+      HOME: /work
+    working_dir: /work
+    # cursor-agent is installed to /usr/local/bin (on PATH, outside the /work bind
+    # mount that would shadow it); the host suite drives it via `docker compose run`,
+    # so the entrypoint is the resolution — no SAGE_AGENT_PATH needed in container mode.
+    entrypoint: ["cursor-agent"]
+    volumes:
+      # Repo root → /sage (read-only). The .cursor/hooks.json the host writes points at
+      # /sage/packages/extension/dist/sage-hook.cjs and the hook resolves its bundled
+      # threats/trusted-domains from /sage/packages/extension/resources.
+      - ..:/sage:ro
+      - *capture-volume
+      # Full-parity HOME bind mount: the host vitest suite drives cursor-agent here and
+      # reads ~/.sage (audit log) back after. Exec-able, so the CLI's cache maps fine.
+      - ./output/cursor-home:/work
+
+  openclaw:
+    build:
+      context: .
+      dockerfile: agents/openclaw/Dockerfile
+      args:
+        # OpenClaw ships as a Docker image, so this is FROM the official image.
+        # OPENCLAW_IMAGE (registry host) lives in .env, like BASE_IMAGE; the tag is
+        # pinned in agents.json.
+        OPENCLAW_IMAGE: ${OPENCLAW_IMAGE}
+        OPENCLAW_VERSION: ${OPENCLAW_VERSION:-2026.7.1}
+    image: sage-e2e-openclaw:${OPENCLAW_VERSION:-2026.7.1}
+    # Upstream OpenClaw ships amd64 only (see Dockerfile); pin so arm64 dev machines
+    # emulate rather than warn.
+    platform: linux/amd64
+    # Run as the host user (run.sh exports SAGE_E2E_UID/GID) so the capture file the
+    # gateway writes into the shared mount, and the gateway config under HOME, are
+    # host-owned — the suite clears them between runs. Defaults to root if unset.
+    user: "${SAGE_E2E_UID:-0}:${SAGE_E2E_GID:-0}"
+    # Vertex ADC auth (shared with claude/opencode). OpenClaw reaches Gemini through its
+    # built-in google-vertex provider; from 2026.7.1 its vertex-adc module delegates to
+    # google-auth-library, which resolves credentials via the full ADC chain INCLUDING the
+    # GCE metadata server (older versions only accepted an API key or a credential file).
+    # No API key: in CI on a GCE VM the attached service account is read from the metadata
+    # server; locally, mount your gcloud ADC via SAGE_E2E_GCP_ADC (see .env.example).
+    env_file:
+      - .env
+    # Publish the gateway so the host vitest suite can POST to it (this service is
+    # long-lived `up -d`, not `run --rm` — OpenClaw is driven over HTTP). Host port is
+    # distinct from OpenClaw's default 18789 so it can't collide with a developer's local
+    # dev gateway; the container always listens on 18789 internally.
+    ports:
+      - "${OPENCLAW_HOST_PORT:-18889}:18789"
+    environment:
+      <<: [*capture-env, *vertex-adc-env]
+      HOME: /work
+      # Pin OpenClaw's state/config dirs under the writable HOME so plugin auto-
+      # discovery ($OPENCLAW_STATE_DIR/extensions/sage, bind-mounted below) and the
+      # config `openclaw config set` writes are deterministic (mirrors the developer
+      # compose, which pins these to avoid host-path leakage into the Linux container).
+      OPENCLAW_HOME: /work
+      OPENCLAW_STATE_DIR: /work/.openclaw
+      OPENCLAW_CONFIG_DIR: /work/.openclaw
+      OPENCLAW_CONFIG_PATH: /work/.openclaw/openclaw.json
+      OPENCLAW_WORKSPACE_DIR: /work/.openclaw/workspace
+      # OpenClaw's google-vertex provider uses the standard Google Cloud vars (NOT the
+      # ANTHROPIC_VERTEX_* names). Reuse the project from .env; default to the `global`
+      # endpoint (matching the Claude path's CLOUD_ML_REGION) — the project must serve
+      # gemini-2.5-flash. Overridable via OPENCLAW_VERTEX_LOCATION.
+      GOOGLE_CLOUD_PROJECT: ${ANTHROPIC_VERTEX_PROJECT_ID:-}
+      GOOGLE_CLOUD_LOCATION: ${OPENCLAW_VERTEX_LOCATION:-global}
+      OPENCLAW_E2E_MODEL: ${OPENCLAW_E2E_MODEL:-google-vertex/gemini-2.5-flash}
+      # Throwaway token guarding the localhost test gateway; the host suite sends the
+      # same value. Not a secret — it only protects an ephemeral containerized gateway.
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:-sage-e2e}
+    working_dir: /work
+    volumes:
+      # Writable HOME: gateway config (~/.openclaw) + Sage runtime state (~/.sage).
+      - ./output/openclaw-home:/work
+      # Host-built Sage connector → the gateway's auto-discovery dir, read-only. No
+      # install/copy step: OpenClaw loads any extension under $OPENCLAW_STATE_DIR/
+      # extensions/<name>/ on startup (exactly like the developer docker-compose.extra.yml).
+      # Always current-branch Sage; the host globalSetup builds dist/ before the run.
+      # run.sh's ensure_output_dirs pre-creates .openclaw/extensions in the HOME mount
+      # above so Docker can nest this read-only mount inside it.
+      - ../packages/openclaw:/work/.openclaw/extensions/sage:ro
+      - *adc-volume
+      - *capture-volume
+
+  vscode:
+    build:
+      context: .
+      dockerfile: agents/vscode/Dockerfile
+      args:
+        VSCODE_VERSION: ${VSCODE_VERSION:-1.125.1}
+        NPM_REGISTRY: ${NPM_REGISTRY:-}
+        # apt mirror of packages.microsoft.com/repos/code. Set (from .env) where the VS Code
+        # download CDN is unreachable (restricted CI network); empty locally → use the CDN.
+        VSCODE_APT_MIRROR: ${VSCODE_APT_MIRROR:-}
+    image: sage-e2e-vscode:${VSCODE_VERSION:-1.125.1}
+    # Runs as root (like claude/copilot): VS Code/Electron + @vscode/test-electron's
+    # default profile dirs live under root-owned /opt, and Electron-as-root just needs
+    # --no-sandbox (set by the runner). Results land in the host-owned /work bind mount
+    # (644), so the host vitest reads them back fine. No host-user UID needed.
+    #
+    # WIRING-ONLY: this drives the Sage extension in a real Extension Host under Xvfb. It
+    # does NOT authenticate Copilot Chat (impossible headless) and needs no model/token —
+    # the suite invokes Sage's hook with synthetic canary payloads. So no env_file,
+    # no Vertex/ADC, no GITHUB_TOKEN, no capture volume (capture is inert without a real
+    # host driving the hook). Real-Chat drift validation is Layer 3 (see e2e/README.md).
+    environment:
+      HOME: /work
+      # The runner + shared module are bind-mounted under /sage (no node_modules there);
+      # NODE_PATH points require() at the image-installed @vscode/test-electron.
+      NODE_PATH: /opt/vscode-test/node_modules
+    working_dir: /work
+    # The Xvfb entrypoint starts a virtual display then execs this runner, which calls
+    # @vscode/test-electron runTests() against the bind-mounted current-branch Sage and
+    # writes vscode-results.json into the HOME bind mount below.
+    command: ["node", "/sage/e2e/agents/vscode/run-host-suite.cjs"]
+    volumes:
+      # Repo root → /sage (read-only): the staged dev extension, the e2e-suite, the hook
+      # runner (dist/sage-hook.cjs), and the run-host-suite entry all load from here.
+      - ..:/sage:ro
+      # HOME bind mount: the in-container suite writes vscode-results.json + the managed
+      # ~/.copilot/hooks/hooks.json here; the host reads results back.
+      - ./output/vscode-home:/work

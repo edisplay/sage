@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { nullLogger } from "@gendigital/sage-core";
+import { nullLogger, type SkillRoot } from "@gendigital/sage-core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { discoverOpenClawPlugins } from "../plugin-discovery.js";
 
@@ -16,6 +16,11 @@ describe("discoverOpenClawPlugins", () => {
 		await rm(dir, { recursive: true, force: true });
 	});
 
+	// Pass `[]` for skillRoots so loose-skill discovery can't reach the real home
+	// dir (~/.agents/skills, ~/.openclaw/skills) and pollute the extension counts.
+	// Skill discovery gets its own dedicated test below.
+	const NO_SKILL_ROOTS: SkillRoot[] = [];
+
 	it("discovers plugins from directory with package.json", async () => {
 		const pluginDir = join(dir, "my-plugin");
 		await mkdir(pluginDir, { recursive: true });
@@ -24,7 +29,7 @@ describe("discoverOpenClawPlugins", () => {
 			JSON.stringify({ name: "my-plugin", version: "1.0.0" }),
 		);
 
-		const plugins = await discoverOpenClawPlugins(nullLogger, dir);
+		const plugins = await discoverOpenClawPlugins(nullLogger, dir, undefined, NO_SKILL_ROOTS);
 		expect(plugins).toHaveLength(1);
 		expect(plugins[0]?.key).toBe("my-plugin@1.0.0");
 		expect(plugins[0]?.installPath).toBe(pluginDir);
@@ -36,12 +41,17 @@ describe("discoverOpenClawPlugins", () => {
 		await mkdir(pluginDir, { recursive: true });
 		await writeFile(join(pluginDir, "index.js"), "module.exports = {};");
 
-		const plugins = await discoverOpenClawPlugins(nullLogger, dir);
+		const plugins = await discoverOpenClawPlugins(nullLogger, dir, undefined, NO_SKILL_ROOTS);
 		expect(plugins).toHaveLength(0);
 	});
 
 	it("handles missing extensions directory", async () => {
-		const plugins = await discoverOpenClawPlugins(nullLogger, join(dir, "nonexistent"));
+		const plugins = await discoverOpenClawPlugins(
+			nullLogger,
+			join(dir, "nonexistent"),
+			undefined,
+			NO_SKILL_ROOTS,
+		);
 		expect(plugins).toHaveLength(0);
 	});
 
@@ -52,7 +62,7 @@ describe("discoverOpenClawPlugins", () => {
 			await writeFile(join(pluginDir, "package.json"), JSON.stringify({ name, version: "2.0.0" }));
 		}
 
-		const plugins = await discoverOpenClawPlugins(nullLogger, dir);
+		const plugins = await discoverOpenClawPlugins(nullLogger, dir, undefined, NO_SKILL_ROOTS);
 		expect(plugins).toHaveLength(2);
 	});
 
@@ -61,7 +71,7 @@ describe("discoverOpenClawPlugins", () => {
 		await mkdir(pluginDir, { recursive: true });
 		await writeFile(join(pluginDir, "package.json"), JSON.stringify({ version: "0.1.0" }));
 
-		const plugins = await discoverOpenClawPlugins(nullLogger, dir);
+		const plugins = await discoverOpenClawPlugins(nullLogger, dir, undefined, NO_SKILL_ROOTS);
 		expect(plugins).toHaveLength(1);
 		expect(plugins[0]?.key).toBe("fallback-name@0.1.0");
 	});
@@ -76,7 +86,27 @@ describe("discoverOpenClawPlugins", () => {
 			JSON.stringify({ name: "real-plugin", version: "1.0.0" }),
 		);
 
-		const plugins = await discoverOpenClawPlugins(nullLogger, dir);
+		const plugins = await discoverOpenClawPlugins(nullLogger, dir, undefined, NO_SKILL_ROOTS);
 		expect(plugins).toHaveLength(1);
+	});
+
+	it("discovers loose skills as pseudo-plugins from skill roots", async () => {
+		// A skill folder (contains SKILL.md) under a temp skill root — not the
+		// extensions dir — should surface as its own pseudo-plugin.
+		const skillsRoot = join(dir, "agents-skills");
+		const skillDir = join(skillsRoot, "my-skill");
+		await mkdir(skillDir, { recursive: true });
+		await writeFile(join(skillDir, "SKILL.md"), "# my-skill\n");
+
+		const emptyExtensions = join(dir, "extensions");
+		await mkdir(emptyExtensions, { recursive: true });
+
+		const plugins = await discoverOpenClawPlugins(nullLogger, emptyExtensions, undefined, [
+			{ dir: skillsRoot, tag: "agents", scope: "personal" },
+		]);
+
+		expect(plugins).toHaveLength(1);
+		expect(plugins[0]?.key).toBe("skill:agents/my-skill@personal");
+		expect(plugins[0]?.installPath).toBe(skillDir);
 	});
 });

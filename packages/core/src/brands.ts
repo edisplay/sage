@@ -16,7 +16,7 @@ export function resolveBranding(brandKey?: string, logger?: Logger): Branding {
 
 	const entry = BRANDS[brandKey];
 	if (!entry) {
-		logger?.warn(`Unknown brand_key "${brandKey}" in config — using default branding`);
+		logger?.warn(`Unknown brand_key "${brandKey}" in config - using default branding`);
 		return defaultBranding;
 	}
 

@@ -1,0 +1,7 @@
+{
+	"toolName": "exec",
+	"params": {
+		"command": "echo openclaw_drift_probe_5b8e1d27"
+	},
+	"sessionKey": "ses-0000000000"
+}

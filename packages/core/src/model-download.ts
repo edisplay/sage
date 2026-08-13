@@ -14,6 +14,7 @@ import {
 	missingRequiredModels,
 	REQUIRED_MODELS_BY_SCHEMA,
 } from "./model-storage.js";
+import type { SageUserConfigInput } from "./sage-proxy.js";
 import type { AgentRuntime, Logger } from "./types.js";
 import { nullLogger } from "./types.js";
 
@@ -22,6 +23,8 @@ export interface EnsureModelsAvailableArgs {
 	iid: string;
 	agentRuntime?: AgentRuntime | string;
 	agentRuntimeVersion?: string;
+	config?: SageUserConfigInput;
+	configPath?: string;
 	versionApp?: string;
 	schema?: string;
 	logger?: Logger;
@@ -62,6 +65,8 @@ export async function ensureModelsAvailable(args: EnsureModelsAvailableArgs): Pr
 		schema,
 		agentRuntime: args.agentRuntime ?? "unknown",
 		agentRuntimeVersion: args.agentRuntimeVersion,
+		config: args.config,
+		configPath: args.configPath,
 		versionApp: args.versionApp,
 		logger,
 	});

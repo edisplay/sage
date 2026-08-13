@@ -5,6 +5,7 @@
 import { createHash } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { MS_PER_DAY } from "./config.js";
 import { atomicWriteJson, getFileContent, getHomeDir } from "./file-utils.js";
 import type {
 	CachedPluginScanResult,
@@ -15,8 +16,16 @@ import type {
 import { nullLogger } from "./types.js";
 
 const DEFAULT_CACHE_PATH = join(getHomeDir(), ".sage", "plugin_scan_cache.json");
-const CACHE_TTL_DAYS = 1;
-const SCHEMA_VERSION = 3;
+/** Fallback scan-result TTL when a caller does not supply one (matches the
+ *  `skill_check.cache_ttl_days` config default). */
+export const DEFAULT_CACHE_TTL_MS = MS_PER_DAY;
+
+// v4: loose-skill keys gained a root tag (skill:<tag>/<rel>@local); drop v3's
+// untagged entries so they re-scan cleanly under the new keys.
+// v5: the version segment changed from "local" to the scope (@personal /
+// @project) so a personal and project skill of the same family no longer
+// collide; drop v4's @local entries so they re-scan under the new keys.
+const SCHEMA_VERSION = 5;
 
 export function cacheKey(pluginKey: string, version: string, lastUpdated: string): string {
 	return `${pluginKey}:${version}:${lastUpdated}`;
@@ -126,6 +135,7 @@ export function isCached(
 	pluginKey: string,
 	version: string,
 	lastUpdated: string,
+	ttlMs = DEFAULT_CACHE_TTL_MS,
 ): boolean {
 	const key = cacheKey(pluginKey, version, lastUpdated);
 	const entry = cache.entries[key];
@@ -134,7 +144,7 @@ export function isCached(
 	try {
 		const scannedAt = new Date(entry.scannedAt);
 		const age = Date.now() - scannedAt.getTime();
-		return age < CACHE_TTL_DAYS * 24 * 60 * 60 * 1000;
+		return age < ttlMs;
 	} catch {
 		return false;
 	}
@@ -145,8 +155,9 @@ export function getCached(
 	pluginKey: string,
 	version: string,
 	lastUpdated: string,
+	ttlMs = DEFAULT_CACHE_TTL_MS,
 ): CachedPluginScanResult | null {
-	if (!isCached(cache, pluginKey, version, lastUpdated)) return null;
+	if (!isCached(cache, pluginKey, version, lastUpdated, ttlMs)) return null;
 	const key = cacheKey(pluginKey, version, lastUpdated);
 	return cache.entries[key] ?? null;
 }

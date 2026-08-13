@@ -1,7 +1,41 @@
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
-import type { Branding, Logger, PluginInfo } from "@gendigital/sage-core";
-import { defaultBranding, getFileContent } from "@gendigital/sage-core";
+import type { Branding, Logger, PluginInfo, SkillRoot } from "@gendigital/sage-core";
+import {
+	defaultBranding,
+	discoverLooseSkillsAcrossRoots,
+	getFileContent,
+} from "@gendigital/sage-core";
+
+export type { SkillRoot };
+
+/**
+ * Discover loose skill folders across one or more skill roots (e.g. Cursor's
+ * `~/.cursor/skills`, or VS Code's `~/.copilot/skills` + `~/.claude/skills` +
+ * `~/.agents/skills`). Delegates to core's {@link discoverLooseSkillsAcrossRoots}
+ * (symlink-safe, recursive, subtree-mtime cache keying, cross-root dedup by
+ * resolved path); this wrapper adds branded debug logging.
+ */
+export async function discoverLooseSkillFolders(
+	logger: Logger,
+	roots: SkillRoot[],
+	branding: Branding = defaultBranding,
+): Promise<PluginInfo[]> {
+	for (const { dir } of roots) {
+		logger.debug(`${branding.name} skill discovery: scanning skills directory`, { path: dir });
+	}
+
+	const merged = await discoverLooseSkillsAcrossRoots(roots);
+
+	for (const plugin of merged) {
+		logger.debug(`${branding.name} skill discovery: found loose skill`, {
+			key: plugin.key,
+			path: plugin.installPath,
+		});
+	}
+	logger.debug(`${branding.name} skill discovery: found ${merged.length} loose skill(s)`);
+	return merged;
+}
 
 export async function discoverExtensionPlugins(
 	logger: Logger,

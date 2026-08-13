@@ -63,7 +63,7 @@ openclaw plugins install ./sage
 
 The build script copies threat definitions and trusted-domains into `resources/` automatically.
 
-> **Note:** OpenClaw's `plugins.code_safety` audit will flag Sage with a `potential-exfiltration` warning. This is a false positive — Sage reads local files (config, cache, YAML threats) and separately sends URLs to a reputation API. No file content is sent over the network.
+> **Note:** OpenClaw's `plugins.code_safety` audit will flag Sage with a `potential-exfiltration` warning. This is a false positive — Sage reads local files (config, cache, YAML threats) and separately sends URLs to a reputation API. The only file content Sage sends is an *unknown skill package* when skill upload is enabled (see [Privacy](#privacy)); no other file content leaves the machine.
 
 ### OpenCode
 
@@ -99,7 +99,7 @@ pnpm install && pnpm --filter @gendigital/sage-opencode run build
 Once installed, ask your AI agent to run this harmless canary command:
 
 ```bash
-echo __sage_test_deny_cmd_a75bf229__
+echo diagmark_cmd_a75bf229
 ```
 
 Sage should block it. The marker string matches rule `DUMMY-CMD-DENY-001` from [`threats/dummy.yaml`](https://github.com/gendigitalinc/sage/blob/main/threats/dummy.yaml) — a set of canary patterns shipped with every connector that cover all decision types (deny / ask / allow) and artifact types (commands, file paths, content, URLs, domains). Use them to sanity-check each detection layer.
@@ -190,6 +190,15 @@ The confidence threshold determines when a detection escalates from `ask` to `de
 
 On connectors that route through `guardToolCall` (OpenClaw and OpenCode), `paranoid` mode also promotes all `ask` verdicts to `deny`. This prevents prompt-injection attacks from auto-approving flagged actions in flows where the agent — rather than a fully isolated UI — mediates approval. Claude Code and the Cursor/VS Code extension use native approval dialogs on a separate code path and are unaffected.
 
+### Skill Checking
+
+Alongside plugin scanning, Sage checks the **skills** installed on your machine — folders containing a `SKILL.md` — across the skill directories your agent loads from. For the exact list of scanned locations per platform, see [Where Sage Looks](plugin-scanning.md#where-sage-looks).
+
+- **Identification first, no upload.** Each skill is identified by a content-addressed ID (a hash of its files). Skills already known to the backend are resolved by ID alone — no content leaves your machine — and a known-risky skill is flagged immediately.
+- **Unknown skills (uploaded by default; opt out to disable).** When a skill is unknown to the backend, its contents — the `SKILL.md` and every supporting file in the skill's folder — are packaged and uploaded for analysis. This is **on by default** (`skill_check.upload_enabled` defaults to `true`); no action is needed to enable it. To keep skill content on your machine, opt out with `upload_enabled: false` (lookup-only, by ID hash) or turn skill checking off entirely with `enabled: false` — see [`skill_check`](#skill_check) and [Privacy](#privacy).
+- **Analysis is asynchronous.** A verdict for a newly discovered skill is produced in the background and typically surfaces on your **next** session, not the one that installed it.
+- **How you're notified.** A `HIGH` or `CRITICAL` verdict is surfaced as a security finding at session start, the same way plugin-scan findings are delivered on your platform; on Claude Code the affected skill is also named on the status line. If you believe a flag is a false positive, remove or replace the skill, or add an [exception](#exceptions).
+
 ---
 
 ## Using Sage
@@ -199,7 +208,7 @@ On connectors that route through `guardToolCall` (OpenClaw and OpenCode), `paran
 After installing Sage, confirm it's working by asking your AI agent to run this harmless canary command:
 
 ```
-echo __sage_test_ask_cmd_8f2e6b71__
+echo diagmark_cmd_8f2e6b71
 ```
 
 This matches rule `DUMMY-CMD-ASK-001`. Under `balanced` (default) or `relaxed` you'll see your platform's approval flow; under `paranoid`, OpenClaw and OpenCode promote the ask to a deny so you'll see a block instead.
@@ -300,6 +309,7 @@ Sage's detection layers can run entirely offline. To disable all cloud services:
   "url_check": { "enabled": false },
   "file_check": { "enabled": false },
   "package_check": { "enabled": false },
+  "skill_check": { "enabled": false },
   "community_iq": false
 }
 ```
@@ -327,6 +337,7 @@ You can also disable individual detection layers in `~/.sage/config.json` withou
 ## Configuration
 
 Sage reads configuration from `~/.sage/config.json`. All fields are optional — defaults are applied automatically.
+Sage also writes the current default configuration to `~/.sage/config.defaults.json` at session start so external GUI tools can show the installed version's defaults. That file contains a `schema_version` metadata field used to coordinate multiple installed Sage versions; `schema_version` is not part of `config.json`.
 
 ### Full Config
 
@@ -344,14 +355,17 @@ Sage reads configuration from `~/.sage/config.json`. All fields are optional —
     "enabled": true,
     "timeout_seconds": 5
   },
+  "skill_check": {
+    "enabled": true,
+    "upload_enabled": true,
+    "cache_ttl_days": 1
+  },
   "amsi_check": {
     "enabled": true
   },
   "pi_check": {
     "enabled": false,
-    "max_content_length": 16384,
-    "high_risk_threshold": 0.99,
-    "medium_risk_threshold": 0.5
+    "max_content_length": 16384
   },
   "heuristics_enabled": true,
   "cache": {
@@ -375,6 +389,7 @@ Sage reads configuration from `~/.sage/config.json`. All fields are optional —
   },
   "sensitivity": "balanced",
   "disabled_threats": [],
+  "announce_clean_scans": true,
   "community_iq": true
 }
 ```
@@ -402,6 +417,16 @@ Sage reads configuration from `~/.sage/config.json`. All fields are optional —
 | `enabled` | `true` | Enable package supply-chain checks |
 | `timeout_seconds` | `5` | Request timeout |
 
+#### `skill_check`
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `enabled` | `true` | Enable skill scanning. Discovered skills are checked against the backend by content-addressed skill ID. |
+| `upload_enabled` | `true` | Upload the contents of skills the backend has never seen for deep analysis. Set to `false` for **lookup-only** mode — skills are still checked by ID and known-risky ones are still flagged, but no skill content ever leaves the machine and the upload worker never runs. |
+| `cache_ttl_days` | `1` | How long a skill verdict is trusted before the skill is re-checked. Values below `1` are treated as `1` — a `0`/sub-day TTL would re-check and re-upload every unknown skill on every session. To disable uploads entirely, use `upload_enabled: false` instead. |
+
+Skill uploads are **privacy-relevant**: an unknown skill's `SKILL.md` and the files/scripts in its own folder are sent to a Gen Digital analysis service, and these may include personal skills you authored (see [Privacy › What Data Is Sent](#what-data-is-sent)). Upload is deduplicated by skill ID (each unknown skill is uploaded at most once) and path/symlink containment is enforced during packaging so only files inside the skill's own directory are included. To keep skill checking but never upload content, set `upload_enabled` to `false`. Skill verdicts arrive asynchronously and surface on a later session.
+
 #### `amsi_check`
 
 | Field | Default | Description |
@@ -417,8 +442,6 @@ When enabled, Sage scans tool inputs (commands, file content, edits) through the
 | `enabled` | `false` | Enable ML-based prompt injection (PI) detection. Heuristic prompt-injection rules are gated separately by `heuristics_enabled`. |
 | `max_content_length` | `16384` | Maximum content length to scan (characters). |
 | `model_path` | unset | Optional absolute path to a model directory (used for air-gapped installs). When unset, Sage manages the model under `~/.sage/models/`. |
-| `high_risk_threshold` | `0.99` | Risk score for `deny` verdict (hard block) |
-| `medium_risk_threshold` | `0.5` | Risk score for medium-risk warning (allow with warning injected via PostToolUse) |
 
 When `pi_check.enabled` is `true`, Sage runs a machine learning model on WebFetch URLs via content pre-fetching at PreToolUse. Heuristic prompt injection rules continue to run on all tools independently. See [Prompt Injection Detection](prompt-injection.md) for details.
 
@@ -507,11 +530,29 @@ Use this to permanently suppress specific rules that don't apply to your workflo
 }
 ```
 
+#### `announce_clean_scans`
+
+Boolean, default `true`. When `false`, Sage suppresses the "🛡️ &lt;brand&gt; v&lt;x.y.z&gt; ✅ No threats found" banner that is otherwise shown to every agent session after a clean plugin scan. Real findings are unaffected — threat banners still surface regardless of this flag.
+
+```json
+{
+  "announce_clean_scans": false
+}
+```
+
+Why you might want this:
+
+- The clean banner is delivered through the agent's context surface (OpenClaw `before_agent_start` prependContext, OpenCode `<system-reminder>`, Claude Code `systemMessage`, Cursor/VS Code toast). On OpenClaw and OpenCode it also carries an "Inform the user about these security findings." line so the agent surfaces it in chat. Stricter models can mistake that pattern for a prompt-injection attempt on every clean session.
+- Operators that already trust their plugin set don't need a per-session reminder; setting `announce_clean_scans: false` keeps Sage silent on the happy path while still allowing real threat banners through.
+
+The flag is honoured by every connector (`@gendigital/sage-openclaw`, `@gendigital/sage-claude-code`, `@gendigital/sage-opencode`, `@gendigital/sage-cursor`, `@gendigital/sage-vscode`).
+
 ### Files on Disk
 
 | Path | Purpose |
 |------|---------|
 | `~/.sage/config.json` | Configuration |
+| `~/.sage/config.defaults.json` | Installed Sage defaults for GUI tools |
 | `~/.sage/cache.json` | Verdict cache |
 | `~/.sage/exceptions.json` | Exception rules (pattern-based allow/deny) |
 | `~/.sage/audit.jsonl` | Audit log |
@@ -519,6 +560,8 @@ Use this to permanently suppress specific rules that don't apply to your workflo
 | `~/.sage/installation-id` | Random UUID identifying this installation |
 | `~/.sage/pending-approvals.json` | Pending approval state (transient, managed by PreToolUse hook) |
 | `~/.sage/consumed-approvals.json` | Consumed approvals for MCP approval flow (10-min TTL entries) |
+| `~/.sage/skill_pending.json` | Skill IDs queued for upload awaiting a verdict (dedup marker; no skill content) |
+| `~/.sage/skill_verdict_cache.json` | Cached skill analysis verdicts (skill ID, verdict, summary; no uploaded content) |
 | `~/.sage/extended-info.json` | Optional additional data merged into telemetry. |
 
 ---
@@ -778,7 +821,7 @@ The OpenClaw connector runs in-process using the OpenClaw plugin API:
 
 **Approval flow:** When Sage flags a tool call with an `ask` verdict, it returns a `requireApproval` object. OpenClaw presents a native approval dialog (Telegram buttons, Discord components, or `/approve` command depending on the channel). The user can allow once, **allow always** (auto-saves an exception rule to `~/.sage/exceptions.json`), or deny.
 
-**Code safety warning:** OpenClaw's `plugins.code_safety` audit will flag Sage with a `potential-exfiltration` warning. This is a false positive — `readFile` and `fetch` coexist in the same bundle because Sage reads local config/cache files and separately sends URLs to a reputation API. No file content is transmitted.
+**Code safety warning:** OpenClaw's `plugins.code_safety` audit will flag Sage with a `potential-exfiltration` warning. This is a false positive — `readFile` and `fetch` coexist in the same bundle because Sage reads local config/cache files and separately sends URLs to a reputation API. The only file content Sage transmits is an *unknown skill package* when skill upload is enabled (see [Privacy](#privacy)); no other file content is sent.
 
 **MCP server:** OpenClaw's native plugin API does not support programmatic MCP server registration, so the Sage MCP tools (`sage_report_false_positive`, `sage_list_audit_entries`) require a one-time manual step. Add the following to your OpenClaw config:
 
@@ -830,17 +873,18 @@ Unmapped tools pass through unchanged.
 
 ### What Data Is Sent
 
-Sage uses Gen Digital cloud services for four purposes:
+Sage uses Gen Digital cloud services for five purposes:
 
 1. **URL reputation** — URLs extracted from tool calls are sent to a reputation API for malware/phishing/scam classification.
 2. **File reputation** — Package hashes (SHA-256) from npm/PyPI registries are checked against a file reputation service.
-3. **Version check** — On session start, Sage sends a POST request to a version-check endpoint with:
+3. **Skill package** — When a discovered skill is **unknown** to the backend, its contents are uploaded to a Gen Digital analysis service for a verdict. Known skills are checked by ID only (no upload), and each unknown skill is deduplicated by skill ID so it is uploaded at most once. The upload contains `SKILL.md` and the files/scripts inside the skill's own folder — **these may include personal skills you authored, which can contain arbitrary personal information.** Only files inside the skill's own directory are included; a skill cannot cause files elsewhere on the filesystem to be uploaded (path/symlink containment is enforced during packaging). Uploads can be disabled with `skill_check.upload_enabled: false` (ID-only lookup, no content leaves the machine) or skill checking turned off entirely with `skill_check.enabled: false`. See [`skill_check`](#skill_check).
+4. **Version check** — On session start, Sage sends a POST request to a version-check endpoint with:
    - Sage version
    - Agent runtime (e.g. `claude-code`, `cursor`, `openclaw`, `opencode`, `vscode`)
    - Agent runtime version (when available). For Cursor and VS Code, Sage reads the host's `product.json` and reports the actual application version rather than the underlying VS Code engine version.
    - OS, OS version, and architecture
    - Installation ID — a random UUID persisted at `~/.sage/installation-id`, generated once and reused across sessions
-4. **Detection telemetry (Community IQ)** — When Sage issues a **deny** verdict, anonymous detection metadata is sent to improve detection quality. This includes:
+5. **Detection telemetry (Community IQ)** — When Sage detects artifacts that are either detected as malicious or suspicious (showing high probability of potential unwanted/malicious behavior), detection metadata is sent to improve detection quality. This includes:
    - The same envelope as version check (Sage version, agent runtime, OS, architecture, installation ID)
    - Detection signals (matched rule IDs, URL check results, package check results, and on Windows/WSL AMSI check results)
    - A structured `content` snapshot with strict per-field caps and sanitization: `command` ≤ 512 chars, `url` ≤ 512 chars, `file_path` ≤ 512 chars, `package_name` ≤ 256 chars, `package_version` / `package_registry` ≤ 128 chars. Home-directory prefixes in `file_path` and `command` are replaced with `~` before send.
@@ -851,7 +895,7 @@ On Windows and WSL, AMSI denies record an `amsi_checks` entry in the audit log a
 
 ### What Data Stays Local
 
-- Source code and file contents are never transmitted
+- Source code and project file contents are never transmitted — the one exception is the contents of an **unknown skill package** while skill upload is enabled (see [What Data Is Sent](#what-data-is-sent); disable with `skill_check.upload_enabled: false`)
 - Commands and command arguments stay local (detection telemetry sends only the command string for Bash denies)
 - File paths stay local (detection telemetry sends only the target file path for file-operation denies)
 - Threat definition matching (heuristics) runs entirely locally
@@ -868,6 +912,16 @@ URL and file reputation checks:
 }
 ```
 
+Skill uploads (keep ID-only lookup, never send skill content):
+
+```json
+{
+  "skill_check": { "upload_enabled": false }
+}
+```
+
+To turn off skill checking entirely, use `"skill_check": { "enabled": false }`.
+
 Detection telemetry:
 
 ```json
@@ -876,7 +930,7 @@ Detection telemetry:
 }
 ```
 
-With URL checks, file checks, and Community IQ all disabled, all detection runs locally via heuristics. The only outbound traffic that remains is the lightweight session-start version check (Sage version, agent runtime, OS, installation ID — no command, URL, or file content).
+With URL checks, file checks, skill uploads, and Community IQ all disabled, all detection runs locally via heuristics. The only outbound traffic that remains is the lightweight session-start version check (Sage version, agent runtime, OS, installation ID — no command, URL, or file content).
 
 ### More Information
 
@@ -903,4 +957,4 @@ Set `"sensitivity": "paranoid"` in `~/.sage/config.json` to block all flagged ac
 
 **Why does OpenClaw flag Sage as "potential-exfiltration"?**
 
-This is a false positive. OpenClaw's `code_safety` audit fires when `readFile` and `fetch` coexist in the same bundle. Sage reads local files (config, cache, YAML) and separately sends URLs to a reputation API. No file content crosses the network.
+This is a false positive. OpenClaw's `code_safety` audit fires when `readFile` and `fetch` coexist in the same bundle. Sage reads local files (config, cache, YAML) and separately sends URLs to a reputation API. The only file content Sage sends is an *unknown skill package* when skill upload is enabled (see [Privacy](#privacy)); no other file content crosses the network.

@@ -6,8 +6,13 @@
 import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import type { Branding, Logger, PluginInfo } from "@gendigital/sage-core";
-import { defaultBranding, getFileContent } from "@gendigital/sage-core";
+import type { Branding, Logger, PluginInfo, SkillRoot } from "@gendigital/sage-core";
+import {
+	defaultBranding,
+	discoverLooseSkillsAcrossRoots,
+	getFileContent,
+	getHomeDir,
+} from "@gendigital/sage-core";
 
 /** Resolve XDG base directories with fallbacks to homedir defaults */
 function getConfigHome(): string {
@@ -21,9 +26,35 @@ function getCacheHome(): string {
 const PROJECT_CONFIG_NAME = "opencode.json";
 
 /**
+ * Loose-skill roots OpenCode loads, at both scopes. Global (personal) skills
+ * live under the user profile; project skills live inside the project dir.
+ * OpenCode reads its own `opencode` family plus Claude- and agent-compatible
+ * families; each is scanned so a malicious skill in any load path is covered.
+ * The global `opencode` root is XDG-based (`~/.config/opencode/skills`), not
+ * `~/.opencode/skills`. The `scope` key segment keeps a personal and project
+ * skill of the same family from colliding in the scan cache.
+ */
+function resolveSkillRoots(projectDir?: string): SkillRoot[] {
+	const roots: SkillRoot[] = [
+		{ dir: join(getConfigHome(), "opencode", "skills"), tag: "opencode", scope: "personal" },
+		{ dir: join(getHomeDir(), ".claude", "skills"), tag: "claude", scope: "personal" },
+		{ dir: join(getHomeDir(), ".agents", "skills"), tag: "agents", scope: "personal" },
+	];
+	if (projectDir) {
+		roots.push(
+			{ dir: join(projectDir, ".opencode", "skills"), tag: "opencode", scope: "project" },
+			{ dir: join(projectDir, ".claude", "skills"), tag: "claude", scope: "project" },
+			{ dir: join(projectDir, ".agents", "skills"), tag: "agents", scope: "project" },
+		);
+	}
+	return roots;
+}
+
+/**
  * Discover OpenCode plugins from all sources:
  * 1. NPM packages from config files
  * 2. Local plugin files (global + project)
+ * 3. Loose skills (global + project) as pseudo-plugins
  */
 export async function discoverOpenCodePlugins(
 	logger: Logger,
@@ -49,6 +80,12 @@ export async function discoverOpenCodePlugins(
 		const projectPlugins = await discoverLocalPlugins(projectPluginsDir, "project", logger);
 		plugins.push(...projectPlugins);
 	}
+
+	// 4. Discover loose skills as pseudo-plugins (deduped by resolved path,
+	// fails open per root) so the scan pipeline covers skills installed outside
+	// any plugin.
+	const skills = await discoverLooseSkillsAcrossRoots(resolveSkillRoots(projectDir));
+	plugins.push(...skills);
 
 	logger.debug(`${branding.name} plugin discovery: found ${plugins.length} plugin(s)`);
 	return plugins;

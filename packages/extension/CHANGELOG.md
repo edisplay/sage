@@ -1,5 +1,34 @@
 # sage-cursor
 
+## 0.12.0
+
+### Minor Changes
+
+- Add skill verdict caching and async upload worker for security analysis
+
+- scan personal skills and surface verdicts on the status line
+
+### Patch Changes
+
+- Fix Cursor hook responses so unsupported or unenforced `ask` verdicts are promoted to `deny` for `preToolUse` and `beforeReadFile`.
+
+- Fix: detect GitHub Copilot CLI 1.0.63 tool calls. Copilot CLI 1.0.63 renamed its
+  hook tool names to PascalCase (`Bash`, `Write`, `Read`, `Edit`, `Grep`,
+  `WebFetch`) and changed input fields (`Write.file_text`, `Edit.old_str/new_str`),
+  which the `vscode`-mode hook only matched under the older lowercase names — so Sage
+  extracted no artifacts and allowed everything for current Copilot CLI. The hook now
+  maps and extracts the PascalCase vocabulary alongside the existing names (Cursor and
+  VS Code Copilot Chat are unaffected — additive only).
+  Also (test/infra-only, no shipped behavior change): extends the containerized
+  live-E2E harness (Layer 2) to the Copilot CLI — the first non-MCP connector. The
+  E2E capture sink and structural envelope-diff helpers move into
+  `@gendigital/sage-core` (the diff helpers behind a `./testing` subpath so they
+  never reach a production bundle); the `vscode`-mode CJS hook feeds the capture sink
+  (inert unless `SAGE_E2E_CAPTURE_DIR` is set, fail-open). Adds committed Layer 1
+  fixtures + a `tool-names-contract` test for the extension, a `copilot` agent image,
+  and `e2e/run.sh copilot` with a `SAGE_E2E_RUNNER=container` seam and payload-drift
+  check.
+
 ## 0.11.0
 
 ### Minor Changes
@@ -32,7 +61,7 @@
 
 ### Patch Changes
 
-- Address agentic review findings: engine cleanup, directory rename, and correctness fixes.
+- Engine cleanup, directory rename, and correctness fixes.
   **Engine cleanup**
 
   - Remove dead `decision` field from internal `Signal` interface; per-signal `applyPolicy` calls were computed and stored but never read — the final decision is derived once from `max(confidences)`.
@@ -47,16 +76,16 @@
   - `custom_allowlist_path` detection: fix false negative where a non-default `trustedDomainsDir` was not recognised as the custom-path variant.
   - Threat loader: validate `confidence` at load time (reject rules with values outside `[0,1]`); fix OpenClaw plugin migration race on concurrent session starts.
   - Heuristic pre-filter: clarify in comments and docs that skipping allow results is semantically safe (allow heuristics never fire on allow-path inputs).
-    **PR review follow-up**
+    **Additional correctness fixes**
   - `applyPolicy` now fails open on out-of-range confidence: logs a warning and returns `allow` instead of throwing `RangeError`. Unifies behavior with `threat-loader.ts` (which already log+skips invalid YAML rules) and preserves the audit trail when a future signal source feeds bad data.
   - Package cache replay: when cached `packageVerdict`/`packageConfidence` are invalid, the entry is treated as a cache miss and re-queried live instead of synthesizing a fallback verdict. Cache entries are version-scoped, so legacy entries written before these fields existed are evicted on version bump.
-  - Docs: scrub legacy vendor reference from `decision-pipeline.md` and `plugin-scanner.ts` jsdoc; reword "threat author" → "threat rule author".
+  - Docs: terminology consistency pass on `decision-pipeline.md` and `plugin-scanner.ts` jsdoc; reword "threat author" → "threat rule author".
 
 - Refresh outdated hook shims on startup.
 
 - Report the host agent version (Claude Code, Cursor, VS Code) correctly.
 
-- Section 5 quick fixes: MCP false-positive tools for OpenCode/OpenClaw, dead code removal, and docs cleanup.
+- MCP false-positive tools for OpenCode/OpenClaw, dead code removal, and docs cleanup.
   **MCP false-positive tools on OpenCode and OpenClaw**
   - OpenCode: plugin now auto-registers the Sage MCP server via a `config` hook (before MCP init). `sage_report_false_positive` and `sage_list_audit_entries` are available without any user configuration.
   - OpenClaw: ships a bundled `dist/mcp-server.cjs`; users add it to `mcp.servers` config manually (one-time step; documented in user-guide).

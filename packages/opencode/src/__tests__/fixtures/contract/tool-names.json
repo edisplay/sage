@@ -1,0 +1,18 @@
+{
+	"opencode": {
+		"bash": "Bash",
+		"webfetch": "WebFetch",
+		"write": "Write",
+		"edit": "Edit",
+		"read": "Read",
+		"glob": "Glob",
+		"grep": "Grep",
+		"ls": "List",
+		"codesearch": "CodeSearch",
+		"websearch": "WebSearch",
+		"question": "Question",
+		"task": "Task",
+		"read_lines": "ReadLines"
+	},
+	"opencodeToolNames": ["bash", "write", "edit", "read", "grep", "webfetch"]
+}

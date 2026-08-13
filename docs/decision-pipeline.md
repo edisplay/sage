@@ -104,7 +104,9 @@ Source label: `"pi_check"`. Bundled ONNX binary classifier (`clients/pi-check.ts
 | Medium | `0.5 ≤ risk < 0.99` | 0.60 | `warning` | `prompt_injection` |
 | Below medium | `risk < 0.5` | _(no signal)_ | — | — |
 
-Thresholds are configurable via `config.pi_check.high_risk_threshold` and `config.pi_check.medium_risk_threshold`. Medium-risk results that don't reach the decision threshold are attached to the verdict as `piWarnings` (when sensitivity is not `relaxed`) for informational display — they do not influence the decision.
+These thresholds are fixed constants (`0.99` / `0.5`). Medium-risk results that don't reach the decision threshold are attached to the verdict as `piWarnings` (when sensitivity is not `relaxed`) for informational display — they do not influence the decision.
+
+**Suspicious-band telemetry (observability only).** PI results scoring in the band `[0.95, 0.99)` on a non-`deny` verdict emit a non-blocking event to `/v2/heuristic`, gated on `config.community_iq`. This never changes the decision.
 
 The raw `risk` score is preserved in audit signal metadata (`pi_checks[].risk`) for debugging.
 
@@ -174,7 +176,7 @@ Implemented in `evaluateToolCall` (`packages/core/src/evaluator.ts`). All error 
 | **15. Cache URL results** | Persists new URL check results to the verdict cache. |
 | **16. Audit signal assembly** | Builds the `AuditSignals` object (`heuristics`, `url_checks`, `file_checks`, `package_checks`, `pi_checks`, `amsi_checks`). Only non-clean signals are included. |
 | **17. Audit logging** | Calls `logVerdict()`. `allow` verdicts are skipped unless `config.log_clean`, `userOverride`, or `AuditSignals` is non-empty. Fails open. |
-| **18. Detection telemetry** | `deny` verdicts only: calls `sendCommunityIqDetection()` if `config.community_iq` enabled. Fails open. |
+| **18. Detection telemetry** | `deny` verdicts call `sendCommunityIqTelemetry()` → `/v2/detection` (blocking event). Otherwise, PI results in the suspicious band (`[0.95, 0.99)`) send a non-blocking event → `/v2/heuristic`. Both gated on `config.community_iq`. Fails open. |
 | **19. Session status update** | Non-`allow` verdicts: calls `updateSessionStatus()` to update the Claude Code status line. Fails open. |
 | **20. PI warnings attachment** | Medium-risk PI results (`mediumRisk ≤ risk < highRisk`) are attached to `verdict.piWarnings` when sensitivity is not `relaxed`. These are informational only — the verdict decision is already set. |
 

@@ -38,7 +38,7 @@ openclaw plugins install @gendigital/sage-openclaw
 
 Sage loads automatically — no configuration needed.
 
-> To verify it's working, ask your agent to run `echo __sage_test_deny_cmd_a75bf229__`. Sage should block this harmless canary command.
+> To verify it's working, ask your agent to run `echo diagmark_cmd_a75bf229`. Sage should block this harmless canary command.
 
 ## What Sage intercepts
 

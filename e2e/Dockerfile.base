@@ -1,0 +1,18 @@
+# Shared base for Sage E2E agent images (Layer 2; see e2e/README.md).
+#
+# Built by e2e/run.sh as `sage-e2e-base:latest`; each per-agent Dockerfile does
+# `FROM sage-e2e-base:latest`. Kept deliberately thin — it's the extension point
+# for tooling shared across agents later. Sage itself is never baked in; it is
+# bind-mounted at runtime so the container always runs the current branch.
+#
+# BASE_IMAGE is supplied at build time (run.sh, from e2e/.env) — the base Node.js
+# image to build from. It is not hardcoded here so the registry host stays out of
+# version control.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+# Ephemeral, tmpfs-backed workspace + HOME (mounted at runtime). The agent's cwd
+# lives here and Sage writes its runtime state under $HOME/.sage. tmpfs is
+# world-writable, so this works regardless of the base image's default user.
+WORKDIR /work
+ENV HOME=/work

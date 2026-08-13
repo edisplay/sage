@@ -7,7 +7,12 @@
  * (returns null on any error).
  */
 
-import { buildSageProxyEnvelope, type SageProxyEnvelope } from "../sage-proxy.js";
+import { loadConfig } from "../config.js";
+import {
+	buildSageProxyEnvelope,
+	type SageProxyEnvelope,
+	type SageUserConfigInput,
+} from "../sage-proxy.js";
 import type { AgentRuntime, Logger } from "../types.js";
 import { nullLogger } from "../types.js";
 import { VERSION } from "../version.js";
@@ -35,6 +40,15 @@ export interface FetchModelManifestArgs {
 	schema: string;
 	agentRuntime: AgentRuntime | string;
 	agentRuntimeVersion?: string;
+	/**
+	 * Active Sage user config to include in the telemetry envelope.
+	 * When provided, no config file read is needed in this function.
+	 */
+	config?: SageUserConfigInput;
+	/**
+	 * Optional explicit config path used only when `config` is not provided.
+	 */
+	configPath?: string;
 	versionApp?: string;
 	logger?: Logger;
 	timeoutMs?: number;
@@ -55,15 +69,26 @@ export async function fetchModelManifest(
 		return null;
 	}
 
-	const envelope = buildSageProxyEnvelope({
-		iid: args.iid,
-		versionApp: args.versionApp ?? VERSION,
-		agentRuntime: args.agentRuntime,
-		agentRuntimeVersion: args.agentRuntimeVersion ?? "unknown",
-	});
-	const body: ManifestRequestBody = { ...envelope, models: { schema: args.schema } };
+	let config: SageUserConfigInput | undefined = args.config;
+	if (!config) {
+		try {
+			config = await loadConfig(args.configPath, logger);
+		} catch (err) {
+			// Fail-open: model manifest fetch should proceed without config metadata.
+			logger.debug(`Model manifest config load failed: ${err}`);
+		}
+	}
 
 	try {
+		const envelope = buildSageProxyEnvelope({
+			iid: args.iid,
+			versionApp: args.versionApp ?? VERSION,
+			agentRuntime: args.agentRuntime,
+			agentRuntimeVersion: args.agentRuntimeVersion ?? "unknown",
+			config,
+		});
+		const body: ManifestRequestBody = { ...envelope, models: { schema: args.schema } };
+
 		const response = await fetch(resolveEndpoint("/v2/model-manifest"), {
 			method: "POST",
 			signal: AbortSignal.timeout(timeoutMs),

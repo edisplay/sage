@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -8,7 +8,8 @@ import {
 	computeSkillId,
 	computeSkillIdsForRoot,
 	entriesFromDirectory,
-	findSkillPackages,
+	findSkillPackagesWithMtime,
+	SkillTooLargeError,
 } from "../skill-id.js";
 
 const IS_WIN = platform() === "win32";
@@ -52,6 +53,11 @@ describe("skill-id", () => {
 	afterEach(async () => {
 		await rm(tempRoot, { recursive: true, force: true });
 	});
+
+	// Folder-only view of discovery, for tests that only care about which
+	// directories are skill packages (not their mtimes).
+	const findSkillFolders = async (root: string): Promise<string[]> =>
+		(await findSkillPackagesWithMtime(root)).map((p) => p.folder);
 
 	describe("computeSkillId", () => {
 		it("produces a stable 64-char hex digest", async () => {
@@ -155,7 +161,7 @@ describe("skill-id", () => {
 		});
 	});
 
-	describe("findSkillPackages", () => {
+	describe("findSkillPackagesWithMtime (folder discovery)", () => {
 		it("finds folders containing SKILL.md", async () => {
 			const a = join(tempRoot, "ext", "skills", "alpha");
 			const b = join(tempRoot, "ext", "skills", "beta");
@@ -168,7 +174,7 @@ describe("skill-id", () => {
 			await mkdir(join(tempRoot, "ext", "src"), { recursive: true });
 			await writeFile(join(tempRoot, "ext", "src", "index.js"), "");
 
-			const found = await findSkillPackages(tempRoot);
+			const found = await findSkillFolders(tempRoot);
 			expect(found.sort()).toEqual([a, b].sort());
 		});
 
@@ -180,17 +186,17 @@ describe("skill-id", () => {
 			await writeFile(join(realSkill, "SKILL.md"), "real");
 			await writeFile(join(noisySkill, "SKILL.md"), "evil");
 
-			const found = await findSkillPackages(tempRoot);
+			const found = await findSkillFolders(tempRoot);
 			expect(found).toEqual([realSkill]);
 		});
 
 		it("returns empty list for missing or non-directory paths", async () => {
 			const ghost = join(tempRoot, "does-not-exist");
-			expect(await findSkillPackages(ghost)).toEqual([]);
+			expect(await findSkillFolders(ghost)).toEqual([]);
 
 			const file = join(tempRoot, "file.txt");
 			await writeFile(file, "");
-			expect(await findSkillPackages(file)).toEqual([]);
+			expect(await findSkillFolders(file)).toEqual([]);
 		});
 	});
 
@@ -207,13 +213,13 @@ describe("skill-id", () => {
 			expect(paths.filter((p) => p === "cycle")).toHaveLength(1);
 		});
 
-		it("findSkillPackages does not hang on a symlink loop", async () => {
+		it("findSkillPackagesWithMtime does not hang on a symlink loop", async () => {
 			const skillDir = join(tempRoot, "loopy2");
 			await mkdir(skillDir, { recursive: true });
 			await writeFile(join(skillDir, "SKILL.md"), "loop test\n");
 			await dirSymlink(skillDir, join(skillDir, "back"));
 
-			const found = await findSkillPackages(tempRoot);
+			const found = await findSkillFolders(tempRoot);
 			expect(found).toContain(skillDir);
 		});
 
@@ -251,7 +257,7 @@ describe("skill-id", () => {
 			},
 		);
 
-		it("findSkillPackages ignores symlinks that escape the root", async () => {
+		it("findSkillPackagesWithMtime ignores symlinks that escape the root", async () => {
 			const outsideDir = join(tempRoot, "outside");
 			await mkdir(outsideDir, { recursive: true });
 			await writeFile(join(outsideDir, "SKILL.md"), "outside\n");
@@ -261,8 +267,142 @@ describe("skill-id", () => {
 			await writeFile(join(pluginDir, "SKILL.md"), "inside\n");
 			await dirSymlink(outsideDir, join(pluginDir, "sneaky"));
 
-			const found = await findSkillPackages(pluginDir);
+			const found = await findSkillFolders(pluginDir);
 			expect(found).toEqual([pluginDir]);
+		});
+
+		it("entriesFromDirectory size cap does not hang on a symlink loop", async () => {
+			const skillDir = join(tempRoot, "loopy3");
+			await mkdir(skillDir, { recursive: true });
+			await writeFile(join(skillDir, "SKILL.md"), "loop test\n");
+			await dirSymlink(skillDir, join(skillDir, "cycle"));
+
+			await expect(entriesFromDirectory(skillDir, 50 * 1024 * 1024)).resolves.toBeDefined();
+		});
+
+		it("entriesFromDirectory size cap ignores directory symlinks that escape the root", async () => {
+			const outsideFile = join(tempRoot, "big-outside.bin");
+			await writeFile(outsideFile, Buffer.alloc(1024));
+
+			const skillDir = join(tempRoot, "contained-size");
+			await mkdir(skillDir, { recursive: true });
+			await writeFile(join(skillDir, "SKILL.md"), "contained\n");
+			await dirSymlink(tempRoot, join(skillDir, "escape"));
+
+			// If the escape symlink were followed, the outside file would push
+			// the total over this tiny limit.
+			await expect(entriesFromDirectory(skillDir, 100)).resolves.toBeDefined();
+		});
+
+		it.skipIf(!canCreateFileSymlink)(
+			"entriesFromDirectory size cap excludes file symlinks that escape the root",
+			async () => {
+				const outsideFile = join(tempRoot, "huge-outside.bin");
+				await writeFile(outsideFile, Buffer.alloc(1024));
+
+				const skillDir = join(tempRoot, "file-escape-size");
+				await mkdir(skillDir, { recursive: true });
+				await writeFile(join(skillDir, "SKILL.md"), "legit\n");
+				await symlink(outsideFile, join(skillDir, "stolen.bin"));
+
+				// The escaped file symlink is dropped from the entries, so it must
+				// not count toward the size cap either — a tiny limit that only the
+				// external file would exceed must not trip SkillTooLargeError.
+				const entries = await entriesFromDirectory(skillDir);
+				const expectedTotal = entries
+					.filter((e) => !e.isDir)
+					.reduce((sum, e) => sum + e.content.length, 0);
+				expect(expectedTotal).toBeLessThan(1024);
+				await expect(entriesFromDirectory(skillDir, expectedTotal)).resolves.toBeDefined();
+			},
+		);
+
+		it("entriesFromDirectory throws SkillTooLargeError once files exceed maxBytes", async () => {
+			const skillDir = join(tempRoot, "folded-oversize");
+			await mkdir(skillDir, { recursive: true });
+			await writeFile(join(skillDir, "big.bin"), Buffer.alloc(200));
+
+			await expect(entriesFromDirectory(skillDir, 100)).rejects.toThrow(SkillTooLargeError);
+			// Without a limit it reads normally.
+			await expect(entriesFromDirectory(skillDir)).resolves.toHaveLength(1);
+		});
+
+		it("entriesFromDirectory size cap counts contained files consistently with its own output", async () => {
+			const skillDir = join(tempRoot, "folded-consistent");
+			const subdir = join(skillDir, "sub");
+			await mkdir(subdir, { recursive: true });
+			await writeFile(join(skillDir, "SKILL.md"), "root\n"); // 5 bytes
+			await writeFile(join(subdir, "f.txt"), "0123456789"); // 10 bytes
+
+			const entries = await entriesFromDirectory(skillDir);
+			const totalBytes = entries
+				.filter((e) => !e.isDir)
+				.reduce((sum, e) => sum + e.content.length, 0);
+
+			await expect(entriesFromDirectory(skillDir, totalBytes)).resolves.toBeDefined();
+			await expect(entriesFromDirectory(skillDir, totalBytes - 1)).rejects.toThrow(
+				SkillTooLargeError,
+			);
+		});
+
+		it("entriesFromDirectory rejects when the root does not exist", async () => {
+			const ghost = join(tempRoot, "does-not-exist-either");
+			await expect(entriesFromDirectory(ghost, 100)).rejects.toThrow();
+		});
+	});
+
+	describe("findSkillPackagesWithMtime", () => {
+		async function mtimeFor(root: string, folder: string): Promise<number | undefined> {
+			const pkgs = await findSkillPackagesWithMtime(root);
+			return pkgs.find((p) => p.folder === folder)?.newestMtimeMs;
+		}
+
+		it("reflects an in-place file edit that leaves the parent dir mtime unchanged", async () => {
+			const skillDir = join(tempRoot, "freshness");
+			const sub = join(skillDir, "sub");
+			await mkdir(sub, { recursive: true });
+			const skillMd = join(skillDir, "SKILL.md");
+			const nested = join(sub, "helper.py");
+			await writeFile(skillMd, "v1\n");
+			await writeFile(nested, "print(1)\n");
+
+			// Pin every node to an old, deterministic mtime.
+			const old = new Date("2020-01-01T00:00:00Z");
+			for (const p of [skillDir, sub, skillMd, nested]) await utimes(p, old, old);
+			expect(await mtimeFor(tempRoot, skillDir)).toBe(old.getTime());
+
+			// Edit a nested file in place and bump only that file's mtime —
+			// the folder mtime deliberately stays old (the bug scenario).
+			const newer = new Date("2021-06-15T12:00:00Z");
+			await utimes(nested, newer, newer);
+
+			expect(await mtimeFor(tempRoot, skillDir)).toBe(newer.getTime());
+			expect(await mtimeFor(tempRoot, skillDir)).toBeGreaterThan(old.getTime());
+		});
+
+		it("a parent package's mtime includes a nested package's newer file", async () => {
+			const parent = join(tempRoot, "parent");
+			const child = join(parent, "child");
+			await mkdir(child, { recursive: true });
+			await writeFile(join(parent, "SKILL.md"), "parent");
+			await writeFile(join(child, "SKILL.md"), "child");
+
+			const old = new Date("2020-01-01T00:00:00Z");
+			for (const p of [parent, child, join(parent, "SKILL.md"), join(child, "SKILL.md")]) {
+				await utimes(p, old, old);
+			}
+			const newer = new Date("2022-03-03T03:03:03Z");
+			await utimes(join(child, "SKILL.md"), newer, newer);
+
+			const pkgs = await findSkillPackagesWithMtime(tempRoot);
+			expect(pkgs.map((p) => p.folder).sort()).toEqual([parent, child].sort());
+			// The nested edit rolls up into the parent's subtree max.
+			expect(pkgs.find((p) => p.folder === parent)?.newestMtimeMs).toBe(newer.getTime());
+			expect(pkgs.find((p) => p.folder === child)?.newestMtimeMs).toBe(newer.getTime());
+		});
+
+		it("returns an empty list for a missing directory", async () => {
+			expect(await findSkillPackagesWithMtime(join(tempRoot, "nope"))).toEqual([]);
 		});
 	});
 

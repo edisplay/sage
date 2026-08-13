@@ -19,8 +19,9 @@
  */
 
 import { createHash } from "node:crypto";
-import { readdir, stat } from "node:fs/promises";
-import { extname, join, relative } from "node:path";
+import { readdir, realpath, stat } from "node:fs/promises";
+import { basename, extname, join, relative, resolve } from "node:path";
+import { logSkillQueued } from "./audit-log.js";
 import type { AmsiClient } from "./clients/amsi.js";
 import { FileCheckClient } from "./clients/file-check.js";
 import { SkillCheckClient } from "./clients/skill-check.js";
@@ -28,8 +29,27 @@ import { UrlCheckClient } from "./clients/url-check.js";
 import { getClaudeConfigDir } from "./config.js";
 import { extractUrls } from "./extractors.js";
 import { getFileContent, getFileContentRaw, getFileContentSync } from "./file-utils.js";
-import { computeSkillIdsForRoot, SKIP_DIRS } from "./skill-id.js";
-import type { Logger, PluginFinding, PluginInfo, PluginScanResult } from "./types.js";
+import { computeSkillIdsForRoot, isContained, SKIP_DIRS } from "./skill-id.js";
+import {
+	addPending,
+	isPending,
+	loadPendingMarker,
+	removePending,
+	savePendingMarker,
+} from "./skill-pending.js";
+import {
+	getVerdict,
+	loadSkillVerdictCache,
+	putVerdict,
+	saveSkillVerdictCache,
+} from "./skill-verdict-cache.js";
+import type {
+	Logger,
+	LoggingConfig,
+	PluginFinding,
+	PluginInfo,
+	PluginScanResult,
+} from "./types.js";
 import { nullLogger } from "./types.js";
 
 function defaultPluginsRegistry(): string {
@@ -134,10 +154,29 @@ export async function discoverPlugins(
 	return plugins;
 }
 
-async function walkPluginFiles(installPath: string, logger: Logger): Promise<string[]> {
+export async function walkPluginFiles(installPath: string, logger: Logger): Promise<string[]> {
 	const files: string[] = [];
+	const visited = new Set<string>();
+
+	let rootReal: string;
+	try {
+		rootReal = await realpath(resolve(installPath));
+	} catch (e) {
+		logger.warn(`Error walking plugin path ${installPath}`, { error: String(e) });
+		return files;
+	}
 
 	async function walk(dirOrFile: string): Promise<void> {
+		let real: string;
+		try {
+			real = await realpath(dirOrFile);
+		} catch {
+			return;
+		}
+		if (visited.has(real)) return;
+		if (!isContained(real, rootReal)) return;
+		visited.add(real);
+
 		let stats: Awaited<ReturnType<typeof stat>>;
 		try {
 			stats = await stat(dirOrFile);
@@ -168,7 +207,7 @@ async function walkPluginFiles(installPath: string, logger: Logger): Promise<str
 		}
 	}
 	try {
-		await walk(installPath);
+		await walk(resolve(installPath));
 	} catch (e) {
 		logger.warn(`Error walking plugin path ${installPath}`, { error: String(e) });
 	}
@@ -184,6 +223,24 @@ export async function scanPlugin(
 		/** Pre-initialized AMSI client, or null if AMSI is unavailable. Caller owns lifecycle. */
 		amsiClient?: AmsiClient | null;
 		logger?: Logger;
+		/** Override the skill verdict cache path (tests); defaults to ~/.sage. */
+		skillVerdictCachePath?: string;
+		/** Override the skill pending marker path (tests); defaults to ~/.sage. */
+		skillPendingPath?: string;
+		loggingConfig?: LoggingConfig;
+		/** How long a cached skill verdict is trusted, in ms. */
+		skillVerdictTtlMs?: number;
+		/** Upload unknown skills for deep analysis. When false, lookup-only. Defaults to true. */
+		uploadEnabled?: boolean;
+		/**
+		 * One-time notice session: when true and `uploadEnabled` is false, an
+		 * unknown skill is not queued (grace) but the plugin's scan cache is
+		 * deferred so the next session (uploads active) re-scans and queues it.
+		 * Distinguishes grace from stable lookup-only mode, which caches as usual.
+		 */
+		deferUnknownSkills?: boolean;
+		/** Agent runtime running this scan (e.g. "cursor"); recorded as skill verdict origin. */
+		agentRuntime?: string;
 	} = {},
 ): Promise<PluginScanResult> {
 	const {
@@ -192,18 +249,33 @@ export async function scanPlugin(
 		checkSkills = true,
 		amsiClient = null,
 		logger = nullLogger,
+		skillVerdictCachePath,
+		skillPendingPath,
+		loggingConfig,
+		skillVerdictTtlMs,
+		uploadEnabled = true,
+		deferUnknownSkills = false,
+		agentRuntime,
 	} = options;
 	const result: PluginScanResult = { plugin, findings: [] };
 
 	// Skill check is independent of the file walk — runs in parallel and
 	// uses its own enumeration via `computeSkillIdsForRoot`.
-	const skillCheckPromise = checkSkills
-		? runSkillCheck(plugin, result.findings, logger)
-		: Promise.resolve();
+	const skillCheckPromise: Promise<boolean> = checkSkills
+		? runSkillCheck(plugin, result.findings, logger, {
+				verdictCachePath: skillVerdictCachePath,
+				pendingPath: skillPendingPath,
+				loggingConfig,
+				verdictTtlMs: skillVerdictTtlMs,
+				uploadEnabled,
+				deferUnknownSkills,
+				agentRuntime,
+			})
+		: Promise.resolve(false);
 
 	const files = await walkPluginFiles(plugin.installPath, logger);
 	if (files.length === 0) {
-		await skillCheckPromise;
+		if (await skillCheckPromise) result.deferCache = true;
 		return result;
 	}
 
@@ -308,41 +380,170 @@ export async function scanPlugin(
 				})()
 			: Promise.resolve();
 
-	await Promise.all([urlCheckPromise, fileCheckPromise, skillCheckPromise]);
+	const [, , skillDeferCache] = await Promise.all([
+		urlCheckPromise,
+		fileCheckPromise,
+		skillCheckPromise,
+	]);
+	if (skillDeferCache) result.deferCache = true;
 
 	return result;
 }
 
+/** Common shape of a skill verdict from either the live lookup or the cache. */
+interface SkillVerdictLike {
+	verdict?: string;
+	summary?: string;
+}
+
+/** Push a SKILL_CHECK finding when the verdict's risk is HIGH or CRITICAL. */
+function pushSkillFindingIfRisky(
+	findings: PluginFinding[],
+	plugin: PluginInfo,
+	skillId: string,
+	folder: string,
+	verdict: SkillVerdictLike,
+): void {
+	const risk = (verdict.verdict ?? "").toUpperCase();
+	if (risk !== "HIGH" && risk !== "CRITICAL") return;
+
+	const severity = risk === "CRITICAL" ? "critical" : "warning";
+	findings.push({
+		threatId: "SKILL_CHECK",
+		title:
+			verdict.summary?.trim() ||
+			(risk === "CRITICAL" ? "Malicious skill detected" : "Suspicious skill detected"),
+		severity,
+		artifact: skillId.slice(0, 16),
+		sourceFile: relative(plugin.installPath, folder) || ".",
+	});
+}
+
+/**
+ * Skill-package risk check, in two phases:
+ *
+ *  1. Resolve each skill from the persistent verdict cache (no network) — a
+ *     cache hit yields a finding for risky skills and is skipped otherwise.
+ *  2. For skills not in the cache, look them up by content-addressed id. A known
+ *     verdict (or explicit clean) is cached; a skill the server has never seen
+ *     (absent from the response) is queued in the pending marker for the
+ *     detached upload worker (Phase 2), deduped so it is submitted only once.
+ *
+ * Fail-open throughout: any error leaves findings untouched.
+ */
 async function runSkillCheck(
 	plugin: PluginInfo,
 	findings: PluginFinding[],
 	logger: Logger,
-): Promise<void> {
+	paths: {
+		verdictCachePath?: string;
+		pendingPath?: string;
+		loggingConfig?: LoggingConfig;
+		verdictTtlMs?: number;
+		uploadEnabled?: boolean;
+		deferUnknownSkills?: boolean;
+		agentRuntime?: string;
+	} = {},
+): Promise<boolean> {
 	try {
-		const skills = await computeSkillIdsForRoot(plugin.installPath);
-		if (skills.length === 0) return;
+		const skills = await computeSkillIdsForRoot(plugin.installPath, logger);
+		if (skills.length === 0) return false;
 
-		const ids = skills.map((s) => s.skillId);
-		const client = new SkillCheckClient(undefined, logger);
-		const verdicts = await client.checkSkills(ids);
-
-		for (const { folder, skillId } of skills) {
-			const verdict = verdicts.get(skillId);
-			if (!verdict) continue;
-			const risk = (verdict.overallRiskLevel ?? "").toUpperCase();
-			if (risk !== "HIGH" && risk !== "CRITICAL") continue;
-
-			const severity = risk === "CRITICAL" ? "critical" : "warning";
-			findings.push({
-				threatId: "SKILL_CHECK",
-				title: verdict.summary?.trim() || `Risky skill detected (${risk})`,
-				severity,
-				artifact: skillId.slice(0, 16),
-				sourceFile: relative(plugin.installPath, folder) || ".",
-				recommendations: verdict.recommendations.length > 0 ? verdict.recommendations : undefined,
-			});
+		// Phase 1 — serve from the persistent verdict cache.
+		const verdictCache = await loadSkillVerdictCache(
+			paths.verdictCachePath,
+			paths.verdictTtlMs,
+			logger,
+		);
+		const uncached: Array<{ folder: string; skillId: string }> = [];
+		for (const skill of skills) {
+			const cached = getVerdict(verdictCache, skill.skillId, paths.verdictTtlMs);
+			if (cached) {
+				pushSkillFindingIfRisky(findings, plugin, skill.skillId, skill.folder, cached);
+			} else {
+				uncached.push(skill);
+			}
 		}
+		if (uncached.length === 0) return false;
+
+		// Phase 2 — look up unknown skills by hash.
+		const client = new SkillCheckClient(undefined, logger);
+		const verdicts = await client.checkSkills(uncached.map((s) => s.skillId));
+
+		const marker = await loadPendingMarker(paths.pendingPath, logger);
+		let cacheModified = false;
+		let markerModified = false;
+		let lookupFailed = false;
+		let graceDeferred = false;
+
+		for (const { folder, skillId } of uncached) {
+			if (!verdicts.has(skillId)) {
+				// Skill absent from map = lookup failed (outage / partial batch error).
+				// Fail open on uploads: skip enqueueing so a transient outage doesn't
+				// flood the analyzer — but remember the failure so the plugin is not
+				// cached as clean below (the cheap hash lookup retries next session).
+				lookupFailed = true;
+				continue;
+			}
+			// A verdict OBJECT means the analyzer has already classified this skill.
+			// A `null` value means the analyzer has never seen it
+			// (per /batch/results: "not found → null") — that is the trigger to
+			// upload it for analysis.
+			const verdict = verdicts.get(skillId) ?? null;
+			if (verdict) {
+				// Known: cache it so later sessions skip the network entirely.
+				putVerdict(verdictCache, skillId, {
+					verdict: verdict.verdict,
+					summary: verdict.summary,
+					skillName: basename(folder),
+					sources: [{ agentRuntime: paths.agentRuntime, containerKey: plugin.key }],
+				});
+				cacheModified = true;
+				pushSkillFindingIfRisky(findings, plugin, skillId, folder, verdict);
+				// Clear from pending if it was queued — verdict is now cached, no upload needed.
+				if (isPending(marker, skillId)) {
+					removePending(marker, skillId);
+					markerModified = true;
+				}
+			} else if (!isPending(marker, skillId)) {
+				// Server returned null → never seen this skill.
+				if (paths.uploadEnabled === false) {
+					// Uploads are off this session.
+					//  - Grace (one-time notice session): uploads turn ON next session,
+					//    so defer this plugin's cache — otherwise it caches as clean now
+					//    and the next session cache-hits it, never queueing the skill
+					//    (activation silently slips by a full cache TTL). See trap 1.
+					//  - Stable lookup-only mode (user set upload_enabled=false): no
+					//    deferral — nothing will ever be queued, so cache as usual.
+					if (paths.deferUnknownSkills) graceDeferred = true;
+				} else {
+					// Hand it to the upload worker (deduped via the pending marker).
+					addPending(marker, skillId, folder, {
+						agentRuntime: paths.agentRuntime,
+						containerKey: plugin.key,
+					});
+					markerModified = true;
+					if (paths.loggingConfig) {
+						logSkillQueued(paths.loggingConfig, skillId, plugin.key, folder).catch(() => {});
+					}
+				}
+			}
+		}
+
+		if (cacheModified) await saveSkillVerdictCache(verdictCache, paths.verdictCachePath, logger);
+		if (markerModified) await savePendingMarker(marker, paths.pendingPath, logger);
+		// Defer cache when any skill is still awaiting a verdict — either newly
+		// queued this session OR already in the pending marker from a prior session
+		// (e.g. the upload worker didn't run because the script was missing). Without
+		// this, the second scan would see isPending=true, skip addPending, leave
+		// markerModified=false, and incorrectly cache the plugin as clean.
+		// Also defer on a failed lookup: otherwise a transient skill-check outage
+		// would cache the plugin as clean for the full scan-cache TTL, suppressing
+		// detection of its skills until the cache expires.
+		const anyStillPending = uncached.some(({ skillId }) => isPending(marker, skillId));
+		return markerModified || anyStillPending || lookupFailed || graceDeferred;
 	} catch (e) {
 		logger.debug("Skill check failed", { error: String(e) });
+		return false;
 	}
 }

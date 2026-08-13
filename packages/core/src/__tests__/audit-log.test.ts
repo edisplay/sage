@@ -1,10 +1,12 @@
 import { readFile, stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	AUDIT_LOG_SCHEMA_VERSION,
 	getRecentEntries,
 	logPluginScan,
+	logSkillQueued,
 	logVerdict,
 } from "../audit-log.js";
 import type { AuditSignals, LoggingConfig, Verdict } from "../types.js";
@@ -34,6 +36,36 @@ function makeVerdict(overrides: Partial<Verdict> = {}): Verdict {
 		...overrides,
 	};
 }
+
+describe("logSkillQueued", () => {
+	let dir: string;
+
+	beforeEach(async () => {
+		dir = await makeTmpDir();
+	});
+
+	it("records skill_id, plugin_key, and a home-scrubbed skill_folder", async () => {
+		const config = makeConfig(dir);
+		const folder = join(homedir(), ".claude", "skills", "risky-skill");
+		await logSkillQueued(config, "abc123", "plugin@marketplace", folder);
+
+		const entry = JSON.parse((await readFile(config.path, "utf-8")).trim());
+		expect(entry.type).toBe("skill_queued");
+		expect(entry.skill_id).toBe("abc123");
+		expect(entry.plugin_key).toBe("plugin@marketplace");
+		// Home-scrubbed: no raw home path leaks into the audit log.
+		expect(entry.skill_folder).not.toContain(homedir());
+		expect(entry.skill_folder).toContain("risky-skill");
+	});
+
+	it("omits skill_folder when no folder is provided", async () => {
+		const config = makeConfig(dir);
+		await logSkillQueued(config, "abc123", "plugin@marketplace");
+
+		const entry = JSON.parse((await readFile(config.path, "utf-8")).trim());
+		expect(entry.skill_folder).toBeUndefined();
+	});
+});
 
 describe("logVerdict", () => {
 	let dir: string;

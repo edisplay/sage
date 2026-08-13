@@ -1,15 +1,70 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { defaultBranding } from "../brands.js";
-import { getClaudeConfigDir, loadConfig, resolvePath } from "../config.js";
+import {
+	getClaudeConfigDir,
+	isFreshTimestamp,
+	loadConfig,
+	MS_PER_DAY,
+	resolvePath,
+	skillCacheTtlMs,
+} from "../config.js";
+import {
+	CONFIG_DEFAULTS_FILENAME,
+	CONFIG_DEFAULTS_SCHEMA_VERSION,
+	deployConfigDefaults,
+	serializeConfigDefaults,
+} from "../config-defaults.js";
 import {
 	formatConfigurationWarnings,
 	getConfigurationWarnings,
 	getConfigurationWarningsSync,
 } from "../config-diagnostics.js";
+import { ConfigSchema } from "../types.js";
 import { makeTmpDir, snapshotEnv, withHomeOverride } from "./test-utils.js";
+
+describe("skillCacheTtlMs", () => {
+	const cfg = (days: number) => ConfigSchema.parse({ skill_check: { cache_ttl_days: days } });
+
+	it("converts whole-day TTLs to milliseconds", () => {
+		expect(skillCacheTtlMs(cfg(3))).toBe(3 * MS_PER_DAY);
+	});
+
+	it("floors a zero TTL to one day so verdicts aren't re-uploaded every session", () => {
+		expect(skillCacheTtlMs(cfg(0))).toBe(MS_PER_DAY);
+	});
+
+	it("floors a sub-one-day TTL to one day", () => {
+		expect(skillCacheTtlMs(cfg(0.25))).toBe(MS_PER_DAY);
+	});
+});
+
+describe("isFreshTimestamp", () => {
+	const now = 1_700_000_000_000;
+	const ttl = 60_000; // 1 minute
+
+	it("is fresh within the TTL window", () => {
+		expect(isFreshTimestamp(now - 30_000, ttl, now)).toBe(true);
+	});
+
+	it("is stale once the TTL window has elapsed", () => {
+		expect(isFreshTimestamp(now - ttl, ttl, now)).toBe(false);
+	});
+
+	it("rejects unparsable (NaN) timestamps", () => {
+		expect(isFreshTimestamp(Number.NaN, ttl, now)).toBe(false);
+	});
+
+	it("rejects timestamps far in the future (clock skew / tampered state)", () => {
+		expect(isFreshTimestamp(now + 60 * 60 * 1000, ttl, now)).toBe(false);
+	});
+
+	it("tolerates small future clock skew", () => {
+		expect(isFreshTimestamp(now + 1_000, ttl, now)).toBe(true);
+	});
+});
 
 describe("resolvePath", () => {
 	it("expands ~ prefix", () => {
@@ -169,6 +224,30 @@ describe("loadConfig", () => {
 		expect(config.disabled_threats).toEqual(["CLT-CMD-001", "CLT-CMD-002"]);
 	});
 
+	it("defaults announce_clean_scans to true when missing", async () => {
+		const config = await loadConfig("/nonexistent/config.json");
+		expect(config.announce_clean_scans).toBe(true);
+	});
+
+	it("parses announce_clean_scans=false from config", async () => {
+		const dir = await makeTmpDir();
+		const configPath = join(dir, "config.json");
+		await writeFile(configPath, JSON.stringify({ announce_clean_scans: false }));
+		const config = await loadConfig(configPath);
+		expect(config.announce_clean_scans).toBe(false);
+	});
+
+	it("falls back to defaults when announce_clean_scans is not a boolean", async () => {
+		// Z falls back to ALL defaults when validation fails on any field,
+		// so a non-boolean here yields announce_clean_scans=true and the rest
+		// of the config also goes to defaults. That's the safe failure mode.
+		const dir = await makeTmpDir();
+		const configPath = join(dir, "config.json");
+		await writeFile(configPath, JSON.stringify({ announce_clean_scans: "no" }));
+		const config = await loadConfig(configPath);
+		expect(config.announce_clean_scans).toBe(true);
+	});
+
 	it("anchors relative state file paths under ~/.sage", async () => {
 		const dir = await makeTmpDir();
 		const configPath = join(dir, "config.json");
@@ -258,6 +337,56 @@ describe("loadConfig", () => {
 		expect(config.logging.path).toBe(resolve(sageDir, "audit.jsonl"));
 		expect(config.operational_logging.path).toBe(resolve(sageDir, "operational.jsonl"));
 	});
+});
+
+describe("config defaults deployment", () => {
+	it("serializes the schema version with canonical formatting", () => {
+		expect(ConfigSchema.parse({})).not.toHaveProperty("schema_version");
+		expect(ConfigSchema.parse({ schema_version: 999 })).not.toHaveProperty("schema_version");
+
+		const serialized = serializeConfigDefaults();
+		expect(serialized.endsWith("\n")).toBe(true);
+		expect(JSON.parse(serialized)).toMatchObject({
+			schema_version: CONFIG_DEFAULTS_SCHEMA_VERSION,
+			sensitivity: "balanced",
+		});
+	});
+
+	it("writes defaults when the file is missing", async () => {
+		const dir = await makeTmpDir();
+		await deployConfigDefaults(dir);
+
+		const raw = await readFile(join(dir, CONFIG_DEFAULTS_FILENAME), "utf-8");
+		expect(raw).toBe(serializeConfigDefaults());
+	});
+
+	it("does not downgrade defaults written by a newer schema", async () => {
+		const dir = await makeTmpDir();
+		await mkdir(dir, { recursive: true });
+		const targetPath = join(dir, CONFIG_DEFAULTS_FILENAME);
+		const newerDefaults = `${JSON.stringify(
+			{ schema_version: CONFIG_DEFAULTS_SCHEMA_VERSION + 1, sentinel: true },
+			null,
+			2,
+		)}\n`;
+		await writeFile(targetPath, newerDefaults);
+
+		await deployConfigDefaults(dir);
+
+		await expect(readFile(targetPath, "utf-8")).resolves.toBe(newerDefaults);
+	});
+
+	it.skipIf(process.platform === "win32")(
+		"tightens permissions on an existing Sage directory",
+		async () => {
+			const dir = await makeTmpDir();
+			await chmod(dir, 0o755);
+
+			await deployConfigDefaults(dir);
+
+			expect((await stat(dir)).mode & 0o777).toBe(0o700);
+		},
+	);
 });
 
 describe("configuration diagnostics", () => {

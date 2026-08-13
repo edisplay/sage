@@ -10,9 +10,11 @@ import {
 	createOperationalLogger,
 	formatAllowlistMigrationWarning,
 	formatConfigurationWarnings,
+	formatNoticeById,
 	getConfigurationWarningsSync,
 	loadConfigSync,
 	resolveBranding,
+	takePendingNotices,
 } from "@gendigital/sage-core";
 import { getBundledDataDirs } from "./bundled-dirs.js";
 import {
@@ -72,11 +74,14 @@ export default {
 		const onFindings = (msg: string) => {
 			pendingScanFindings = msg;
 		};
-		const getPendingFindings = () =>
+		// Security findings (config warnings + scan results) share one block; the
+		// one-time notice rides its own block (see below) so it is never framed as
+		// a security alert.
+		const getPendingSecurityFindings = () =>
 			[pendingConfigurationWarnings, pendingScanFindings].filter(Boolean).join("\n\n") || null;
 
 		const beforeAgentStartHandler = createBeforeAgentStartHandler(
-			getPendingFindings,
+			getPendingSecurityFindings,
 			() => {
 				pendingConfigurationWarnings = null;
 				pendingScanFindings = null;
@@ -85,16 +90,47 @@ export default {
 			branding,
 		);
 
+		// Resolve one-time notices from disk at delivery time. The scan
+		// (gateway_start/session_start) runs in a different process/turn and its
+		// in-memory hand-off never reaches before_agent_start, so we read
+		// install-state.json here and commit each notice's "shown" flag exactly
+		// when it is handed to the user. Idempotent: only the first turn per
+		// install returns anything.
+		const resolveNoticeText = async (): Promise<string | null> => {
+			try {
+				const ids = await takePendingNotices({ logger });
+				const text = ids
+					.map((id) => formatNoticeById(id, branding))
+					.filter(Boolean)
+					.join("\n\n");
+				logger.debug(`${branding.name}: notices resolved for delivery`, {
+					noticeIds: ids,
+					willShow: text.length > 0,
+				});
+				return text.length > 0 ? text : null;
+			} catch (e) {
+				logger.warn(`${branding.name}: notice resolution failed`, { error: String(e) });
+				return null;
+			}
+		};
+
 		api.on(
 			"before_tool_call",
 			createToolCallHandler(approvalStore, toolLogger, threatsDir, trustedDomainsDir, branding),
 			{ priority: 100 },
 		);
-		api.on("gateway_start", createStartupScanHandler(scanLogger, branding, onFindings));
-		api.on("session_start", createSessionScanHandler(scanLogger, branding, onFindings));
+		api.on(
+			"gateway_start",
+			createStartupScanHandler(scanLogger, branding, onFindings, config.announce_clean_scans),
+		);
+		api.on(
+			"session_start",
+			createSessionScanHandler(scanLogger, branding, onFindings, config.announce_clean_scans),
+		);
 		api.on("before_agent_start", async () => {
 			await migrationCheckPromise;
-			return beforeAgentStartHandler();
+			const notices = await resolveNoticeText();
+			return beforeAgentStartHandler(notices);
 		});
 	},
 };

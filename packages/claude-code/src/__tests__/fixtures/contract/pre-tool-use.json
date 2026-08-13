@@ -1,0 +1,14 @@
+{
+	"session_id": "sess-parity-1",
+	"transcript_path": "/tmp/transcripts/sess-parity-1.jsonl",
+	"cwd": "/repo/project",
+	"permission_mode": "default",
+	"hook_event_name": "PreToolUse",
+	"tool_name": "Bash",
+	"tool_use_id": "toolu_parity_pre",
+	"tool_input": {
+		"command": "echo hello",
+		"description": "Print a greeting",
+		"timeout": 5000
+	}
+}

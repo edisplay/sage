@@ -15,6 +15,8 @@ import {
 	type Branding,
 	type CanonicalToolType,
 	canonicalizeToolName,
+	captureEnabled,
+	captureHookInput,
 	defaultBranding,
 	extractFromBash,
 	extractFromEdit,
@@ -26,7 +28,7 @@ import {
 	summarizeArtifacts,
 } from "@gendigital/sage-core";
 
-const OPENCLAW_TOOL_MAP: Record<string, CanonicalToolType> = {
+export const OPENCLAW_TOOL_MAP: Record<string, CanonicalToolType> = {
 	bash: "Bash",
 	exec: "Bash",
 	web_fetch: "WebFetch",
@@ -150,6 +152,23 @@ export function createToolCallHandler(
 		});
 		try {
 			const { toolName, params } = event;
+
+			// E2E payload-drift capture (drift loop). OpenClaw is an in-process
+			// plugin (api.on("before_tool_call")), so the "raw wire" payload is the
+			// in-proc event shape OpenClaw hands us. Namespaced openclaw-* so it can't
+			// collide with other agents sharing SAGE_E2E_CAPTURE_DIR. Inert in
+			// production (env unset); fail-open inside captureHookInput.
+			if (captureEnabled()) {
+				await captureHookInput(
+					"PreToolUse",
+					{ toolName, params, sessionKey: ctx?.sessionKey },
+					{
+						toolName: canonicalizeToolName(OPENCLAW_TOOL_MAP, toolName),
+						toolInput: normalizeToolInput(toolName, params),
+					},
+					{ filePrefix: "openclaw-" },
+				);
+			}
 
 			// Map tool → artifacts. No artifacts → pass through.
 			const artifacts = mapToolToArtifacts(toolName, params);

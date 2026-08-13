@@ -136,7 +136,9 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm -C packages/openclaw build
+      # Build openclaw plus its workspace deps (core, mcp) in dependency order;
+      # building packages/openclaw alone can't resolve @gendigital/sage-core / sage-mcp.
+      - run: pnpm --filter "@gendigital/sage-openclaw..." run build
       - name: Authenticate to ClawHub
         env:
           CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}

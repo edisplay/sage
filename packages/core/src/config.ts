@@ -13,6 +13,39 @@ export const SAGE_DIR = "~/.sage";
 /** Hook timeout in seconds, shared across all connector hook installers. */
 export const HOOK_TIMEOUT_SECONDS = 8;
 
+/** Milliseconds in one day. Shared so day-based TTLs convert consistently. */
+export const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Skill verdict / plugin-scan cache TTL in milliseconds, derived from
+ * `skill_check.cache_ttl_days`. Floored at one day: the config schema permits
+ * `0`, but a zero/sub-day TTL would expire every cached verdict immediately and
+ * re-upload every unknown skill on every session (an egress + cost footgun). To
+ * stop uploads entirely, set `skill_check.upload_enabled` to `false` instead.
+ * Flooring here rather than in the schema keeps a misconfigured value from
+ * failing whole-config validation and silently reverting all other settings.
+ */
+export function skillCacheTtlMs(config: Config): number {
+	return Math.max(1, config.skill_check.cache_ttl_days) * MS_PER_DAY;
+}
+
+/** Tolerated future clock skew before a timestamp is treated as invalid. */
+const CLOCK_SKEW_TOLERANCE_MS = 5 * 60 * 1000;
+
+/**
+ * Whether a millisecond timestamp is valid and still within `ttlMs`. Guards
+ * the `now - ts < ttl` pattern against two failure modes: unparsable values
+ * (`NaN`) and timestamps in the future — from clock skew or a tampered state
+ * file — which would otherwise produce a negative age and read as permanently
+ * fresh (never expiring, pinning stale verdicts / pending entries forever). A
+ * small skew tolerance avoids needless re-checks on minor clock drift.
+ */
+export function isFreshTimestamp(ts: number, ttlMs: number, now: number = Date.now()): boolean {
+	if (Number.isNaN(ts)) return false;
+	if (ts - now > CLOCK_SKEW_TOLERANCE_MS) return false;
+	return now - ts < ttlMs;
+}
+
 function resolvedSageDir(): string {
 	return resolvePath(SAGE_DIR);
 }
@@ -112,7 +145,7 @@ function sanitizeBrandKey(data: Record<string, unknown>, logger: Logger): Record
 	) {
 		return data;
 	}
-	logger.warn(`Invalid brand_key in config — ignoring`, { brand_key: brandKey });
+	logger.warn(`Invalid brand_key in config - ignoring`, { brand_key: brandKey });
 	const { brand_key: _, ...rest } = data;
 	return rest;
 }
@@ -174,6 +207,41 @@ function parseConfig(raw: string, path: string, logger: Logger): Config {
 		logger.warn(`Config validation failed, using defaults`, { error: String(e) });
 		return defaultConfig(logger);
 	}
+}
+
+/**
+ * Whether `skill_check.upload_enabled` is *explicitly* set in the user's raw
+ * config, and its value. `ConfigSchema` applies `.default(true)`, which erases
+ * the absent-vs-explicit distinction after parse — but the skill-upload rollout
+ * needs it: an explicit value must win over the notice/activation state machine
+ * ("explicit config wins"), while an absent key must fall through to it.
+ *
+ * Fails-open to `{ present: false }`: a missing/corrupt config, or a
+ * non-boolean value, is treated as "not explicitly set" so the rollout governs
+ * and no upload happens until the user has been noticed.
+ */
+export async function readExplicitSkillUploadEnabled(
+	configPath?: string,
+	logger: Logger = nullLogger,
+): Promise<{ present: boolean; value: boolean }> {
+	const path = configPath ? resolvePath(configPath) : defaultConfigPath();
+	try {
+		const data = JSON.parse(await getFileContent(path)) as Record<string, unknown>;
+		const skillCheck = data.skill_check;
+		if (
+			skillCheck &&
+			typeof skillCheck === "object" &&
+			!Array.isArray(skillCheck) &&
+			"upload_enabled" in skillCheck
+		) {
+			const value = (skillCheck as Record<string, unknown>).upload_enabled;
+			if (typeof value === "boolean") return { present: true, value };
+			logger.warn("Config skill_check.upload_enabled is not a boolean; ignoring", { value });
+		}
+	} catch {
+		// Missing/corrupt config — treat as not explicitly set (fail-open).
+	}
+	return { present: false, value: false };
 }
 
 export async function loadConfig(

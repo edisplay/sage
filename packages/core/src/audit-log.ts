@@ -5,16 +5,11 @@
 
 import { randomUUID } from "node:crypto";
 import { resolvePath } from "./config.js";
+import { scrubHomePath } from "./content-snapshot.js";
 import { getFileContent } from "./file-utils.js";
 import { appendJsonlEntry } from "./jsonl-log-writer.js";
-import type {
-	AgentRuntime,
-	AuditSignals,
-	HookType,
-	LoggingConfig,
-	PiCheckConfig,
-	Verdict,
-} from "./types.js";
+import type { AgentRuntime, AuditSignals, HookType, LoggingConfig, Verdict } from "./types.js";
+import { DEFAULT_PI_HIGH_RISK_THRESHOLD, DEFAULT_PI_MEDIUM_RISK_THRESHOLD } from "./types.js";
 
 /**
  * Structured input to {@link logVerdict}. Replaces the previous 11-parameter
@@ -24,7 +19,7 @@ import type {
  * `content` is the structured snapshot produced by `buildContentSnapshot`
  * (in `content-snapshot.ts`). `audit-log.ts` deliberately does not import
  * the builder — the evaluator constructs `content` once, then passes the
- * opaque object to both this function and `sendCommunityIqDetection`.
+ * opaque object to both this function and `sendCommunityIqTelemetry`.
  */
 export interface VerdictLogEntry {
 	sessionId: string;
@@ -156,7 +151,6 @@ export async function logPluginScan(
 export async function findPiWarningInAuditLog(
 	loggingConfig: LoggingConfig,
 	toolUseId: string,
-	piConfig: PiCheckConfig,
 ): Promise<{ risk: number; contentName: string } | null> {
 	const entries = await getRecentEntries(loggingConfig, 20);
 	for (const raw of entries.reverse()) {
@@ -166,12 +160,61 @@ export async function findPiWarningInAuditLog(
 			| { pi_checks?: { risk: number; content_name: string }[] }
 			| undefined;
 		const pi = signals?.pi_checks?.[0];
-		if (pi && pi.risk >= piConfig.medium_risk_threshold && pi.risk < piConfig.high_risk_threshold) {
+		if (
+			pi &&
+			pi.risk >= DEFAULT_PI_MEDIUM_RISK_THRESHOLD &&
+			pi.risk < DEFAULT_PI_HIGH_RISK_THRESHOLD
+		) {
 			return { risk: pi.risk, contentName: pi.content_name };
 		}
 		break;
 	}
 	return null;
+}
+
+export async function logSkillQueued(
+	config: LoggingConfig,
+	skillId: string,
+	pluginKey: string,
+	skillFolder?: string,
+): Promise<void> {
+	if (!config.enabled) return;
+	try {
+		await appendEntry(config, {
+			type: "skill_queued",
+			timestamp: new Date().toISOString(),
+			skill_id: skillId,
+			plugin_key: pluginKey,
+			// Home-scrubbed folder path: aids forensics when the same skill id shows
+			// up under multiple plugins. Omitted when the caller has no path.
+			...(skillFolder ? { skill_folder: scrubHomePath(skillFolder) } : {}),
+		});
+	} catch {
+		// Fail-open
+	}
+}
+
+export async function logSkillVerdict(
+	config: LoggingConfig,
+	skillId: string,
+	status: "analyzed" | "too_large" | "error" | "no_verdict",
+	verdict?: string,
+	summary?: string,
+): Promise<void> {
+	if (!config.enabled) return;
+	const entry: Record<string, unknown> = {
+		type: "skill_verdict",
+		timestamp: new Date().toISOString(),
+		skill_id: skillId,
+		status,
+	};
+	if (verdict !== undefined) entry.verdict = verdict;
+	if (summary !== undefined) entry.summary = summary.slice(0, MAX_SUMMARY_LEN);
+	try {
+		await appendEntry(config, entry);
+	} catch {
+		// Fail-open
+	}
 }
 
 export async function getRecentEntries(config: LoggingConfig, limit = 100): Promise<unknown[]> {

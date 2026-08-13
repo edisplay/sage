@@ -14,12 +14,9 @@ pnpm test                                    # Run all tests (builds automatical
 pnpm test -- --reporter=verbose              # Verbose test output
 pnpm test -- packages/core/src/__tests__/extractors.test.ts  # Single test file
 pnpm test -- -t "test name"                  # Run single test by name
-pnpm test:e2e                                # All E2E tests (Claude Code + OpenClaw + Cursor + VS Code + Copilot CLI)
-pnpm test:e2e:claude                         # Claude Code E2E only
-pnpm test:e2e:openclaw                       # OpenClaw E2E only (requires gateway + token)
-pnpm test:e2e:cursor                         # Cursor extension E2E only
-pnpm test:e2e:vscode                         # VS Code extension E2E only
-pnpm test:e2e:copilot-cli                    # Copilot CLI E2E only
+e2e/run.sh <agent>                           # Layer 2 containerized live E2E (claude|copilot|opencode|cursor|openclaw|vscode|all); needs Docker + e2e/.env
+SAGE_E2E_RUNNER=native pnpm test:e2e:<agent> # Layer 2 native live E2E, no Docker (claude|opencode|cursor|copilot-cli); needs the CLI installed + authenticated
+pnpm test:e2e:cursor                         # Layer 3 desktop Extension Host (installed Cursor binary); :vscode for VS Code
 pnpm build                                  # Build all packages (tsc + esbuild bundle)
 pnpm build:sea                              # Build standalone SEA binaries (requires official Node.js, not Homebrew)
 pnpm lint                                   # Lint with Biome
@@ -46,24 +43,24 @@ TypeScript monorepo with five packages:
 
 ## Test Tiers
 
+E2E is split into layers: **Layer 1** (deterministic detection + host I/O contract, in `pnpm test`), **Layer 2** (real agents + Sage — wiring + payload/tool-name drift, never re-asserting detection; containerized or, for claude/opencode/cursor/copilot, native/no-Docker), and **Layer 3** (desktop GUI Extension Host). See `docs/developer-guide.md#test-tiers`.
+
 | Tier | Scope | Files | Requires |
 |------|-------|-------|----------|
 | 1 — Unit | Core library functions | `packages/core/src/__tests__/*.test.ts` | pnpm dev deps |
-| 2 — Integration | Hook/plugin entry points | `packages/claude-code/src/__tests__/`, `packages/openclaw/src/__tests__/e2e-integration.test.ts` | pnpm dev deps |
-| 3 — E2E (Claude Code) | Full plugin in Claude CLI | `packages/claude-code/src/__tests__/e2e.test.ts` | `claude` CLI + `ANTHROPIC_API_KEY` |
-| 3 — E2E (OpenClaw) | Full plugin in OpenClaw gateway | `packages/openclaw/src/__tests__/e2e.test.ts` | OpenClaw gateway (token read from `~/.openclaw/openclaw.json`) |
-| 3 — E2E (Cursor extension) | Sage extension in Cursor Extension Host | `packages/extension/src/__tests__/e2e.test.ts` | Installed Cursor executable |
-| 3 — E2E (VS Code extension) | Sage extension in VS Code Extension Host | `packages/extension/src/__tests__/e2e.test.ts` | Installed VS Code executable |
-| 3 — E2E (Copilot CLI) | Sage hooks in Copilot CLI | `packages/extension/src/__tests__/e2e-copilot-cli.test.ts` | `copilot` CLI + GitHub auth |
+| 2 — Layer 1 (contract/integration) | Detection + host contract + tool-name maps + connector behaviors (registration, prompt injection), via mock API | `packages/*/src/__tests__/integration.test.ts`, `*contract*.test.ts`, `packages/openclaw/.../e2e-integration.test.ts` | pnpm dev deps |
+| 3 — Layer 2 (containerized live E2E) | Real agent + Sage in Docker; canary-deny wiring + drift | `packages/{claude-code,openclaw,opencode}/src/__tests__/e2e.test.ts`, `packages/extension/src/__tests__/e2e-copilot-cli.test.ts`, cursor-headless + vscode-container blocks of `packages/extension/src/__tests__/e2e.test.ts` | Docker + `e2e/.env`; `e2e/run.sh <agent>` |
+| 3 — Layer 2 (native live E2E) | Same canary-deny wiring, no Docker; drift/tool-catalog checks stay container-only | Same files, minus `openclaw` (container-only) | Installed + authenticated CLI; `SAGE_E2E_RUNNER=native pnpm test:e2e:<agent>` |
+| 3 — Layer 3 (desktop GUI) | Sage extension in installed Cursor / VS Code Extension Host | Block A of `packages/extension/src/__tests__/e2e.test.ts` | Installed Cursor / VS Code binary |
 | 4 — ML accuracy benchmark | PI model recall + FP rate on benign/injection/IOC fixtures | `packages/core/scripts/eval-pi-accuracy.mjs` + `packages/core/src/__tests__/fixtures/pi-{benign,injection,ioc-snippets}*.json` | pnpm dev deps + model present at `~/.sage/models/<schema>/pi-model/` |
 
-`pnpm test` runs tiers 1–2 automatically (builds via `globalSetup` before running). Tier 3 (E2E) is excluded — run with `pnpm test:e2e` (all), `pnpm test:e2e:claude`, `pnpm test:e2e:openclaw`, `pnpm test:e2e:cursor`, `pnpm test:e2e:vscode`, or `pnpm test:e2e:copilot-cli`.
+`pnpm test` runs tiers 1–2 automatically (builds via `globalSetup` before running). Tier 3 is excluded — run Layer 2 with `e2e/run.sh <agent>` (or `all`) or natively with `SAGE_E2E_RUNNER=native pnpm test:e2e:<agent>`, Layer 3 with `pnpm test:e2e:cursor` / `:vscode`.
 
-**Claude Code E2E prerequisites:** `claude` CLI in PATH, valid `ANTHROPIC_API_KEY`, and Sage must **not** be installed via the Claude Code marketplace (duplicate-plugin conflict with `--plugin-dir`).
+**Layer 2 prerequisites (container):** Docker + a populated `e2e/.env` (copy `e2e/.env.example`). Suites are gated on `SAGE_E2E_RUNNER=container` (set by `run.sh`) and skip otherwise. Auth via `e2e/.env`: claude/opencode/openclaw use **Vertex ADC** (no API key — never `ANTHROPIC_API_KEY`/`GEMINI_API_KEY`), copilot uses a Copilot-entitled `GITHUB_TOKEN`, cursor uses `CURSOR_API_KEY`, vscode needs nothing. See `docs/developer-guide.md#layer-2--containerized-live-e2e`.
 
-**OpenClaw E2E prerequisites:** Running OpenClaw gateway with Sage installed. Auth token is read from `~/.openclaw/openclaw.json` automatically (override via `OPENCLAW_GATEWAY_TOKEN` env var). See `docs/developer-guide.md#openclaw` for gateway setup.
+**Layer 2 prerequisites (native):** no Docker, no `e2e/.env` — just the CLI installed and already authenticated (claude, opencode, cursor-agent, or copilot; `openclaw` has no native path). Gated on `SAGE_E2E_RUNNER=native`, isolated to a temp HOME, reuses ambient auth (never the real `~/.sage`/`~/.claude`/`~/.cursor`/`~/.copilot`). First Windows-facing E2E path in this project — no Windows E2E CI exists for any layer, so verify locally before relying on it there. See `docs/developer-guide.md#layer-2--native-live-e2e-no-docker`.
 
-**Cursor / VS Code E2E prerequisites:** Installed Cursor / VS Code executables. Cursor headless agent coverage in `pnpm test:e2e:cursor` additionally requires the `agent` CLI (PATH or `SAGE_AGENT_PATH`) plus valid auth (`agent login` or `CURSOR_API_KEY`); if unavailable, only that headless sub-suite is skipped. Optional executable overrides: `SAGE_CURSOR_PATH`, `SAGE_AGENT_PATH`, `SAGE_VSCODE_PATH`, `VSCODE_EXECUTABLE_PATH`.
+**Layer 3 prerequisites:** Installed Cursor / VS Code executable (skips if absent). Optional overrides: `SAGE_CURSOR_PATH`, `SAGE_VSCODE_PATH`, `VSCODE_EXECUTABLE_PATH`.
 
 **Tier 4 (ML accuracy):** `pnpm eval:pi` runs the cached PI classifier against three fixtures (50 benign, 50 synthetic injections, 10 sanitized real-world IOC snippets from Unit 42's IDPI research) and prints per-suite recall, FP rate, and per-category breakdown. Pure observability — no assertions, never gates CI. The model is no longer in the repo; the script reads it from `~/.sage/models/<schema>/pi-model/`. Run a Sage session with `pi_check.enabled = true` once to populate that directory, or place the files manually. Use it before/after model swaps or threshold tuning to see how detection shifts.
 
@@ -116,4 +113,4 @@ This is a **multi-platform plugin** with three connectors and a shared core:
 
 ## Pre-PR Checklist
 
-Before creating a pull request, run the @"code-simplifier:code-simplifier (agent)" subagent on all changed files to review for clarity, consistency, and maintainability improvements. Apply any suggested changes before opening the PR.
+If you use Claude Code, run `/simplify` before creating a pull request to review changed files for clarity, consistency, and maintainability improvements. Apply any suggested changes before opening the PR.

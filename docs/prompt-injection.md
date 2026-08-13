@@ -61,7 +61,7 @@ The ML model is not bundled with Sage. The first time you start a Sage-managed s
 ~/.sage/models/<schema>/
 ```
 
-The schema tag (currently `v1`) is bumped only when the model layout changes; Sage upgrades that don't change the model reuse the already-downloaded files. Files are downloaded over HTTPS and verified with a SHA-256 checksum before they replace the cached copy.
+The schema tag (currently `v2`; `v1` for Sage 0.11.x and older) is bumped when a release ships a model that existing installs must pick up; upgrades that keep the same tag reuse the already-downloaded files. Files are downloaded over HTTPS and verified with a SHA-256 checksum before they replace the cached copy.
 
 Before the download finishes, ML inference is **skipped** for that session — heuristics still run. The model is picked up on the next session start.
 
@@ -104,7 +104,7 @@ The ML model is trained on specific content types. To avoid feeding it content i
 | >= 0.5 | `allow` + warn | Medium risk — tool call proceeds, warning injected via PostToolUse. Suppressed under `sensitivity = "relaxed"`. |
 | < 0.5 | `allow` | Clean content |
 
-Thresholds are configurable via `pi_check.high_risk_threshold` and `pi_check.medium_risk_threshold` in config. The defaults are tuned for the bundled model and should not need adjustment.
+These thresholds are fixed constants, tuned for the bundled model and not intended to be changed.
 
 Setting `sensitivity = "relaxed"` suppresses the entire medium band — no warnings are injected for medium-risk PI detections. High-risk denies and all heuristic prompt-injection rules are unaffected.
 
@@ -181,9 +181,7 @@ This works for both PreToolUse (deny verdicts) and PostToolUse (warning verdicts
   "pi_check": {
     "enabled": false,
     "max_content_length": 16384,
-    "model_path": "/custom/path/to/model",
-    "high_risk_threshold": 0.99,
-    "medium_risk_threshold": 0.5
+    "model_path": "/custom/path/to/model"
   }
 }
 ```
@@ -193,8 +191,6 @@ This works for both PreToolUse (deny verdicts) and PostToolUse (warning verdicts
 | `enabled` | `false` | Enable ML-based prompt injection detection. Triggers a one-time background model download on the next session start. Tier 1 heuristic rules are unaffected by this flag. |
 | `max_content_length` | `16384` | Max content to scan (chars). Longer content is sampled from head (80%) + tail (20%). Also limits the pre-fetch response size. |
 | `model_path` | auto | Absolute path to a model directory. When set, the auto-download is bypassed entirely (use this for air-gapped installs). When unset, the model is resolved from `~/.sage/models/`. |
-| `high_risk_threshold` | `0.99` | Risk score for `deny` verdict (hard block) |
-| `medium_risk_threshold` | `0.5` | Risk score for medium-risk warning (allow with warning injected via PostToolUse) |
 
 ## Accuracy Benchmark
 

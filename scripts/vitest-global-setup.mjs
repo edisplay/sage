@@ -1,17 +1,9 @@
-import { execSync } from "node:child_process";
-
-const run = (cmd, cwd) => execSync(cmd, { stdio: "inherit", cwd });
+import { buildE2E } from "./build-e2e.mjs";
 
 export function setup() {
-	// Build core first (needed by all other packages)
-	run("pnpm --filter @gendigital/sage-core run build");
-	// Build shared MCP package (needed by claude-code MCP server bundle)
-	run("pnpm --filter @gendigital/sage-mcp run build");
-	// Build claude-code and openclaw (no corepack dependency)
-	run("pnpm --filter @gendigital/sage-claude-code --filter @gendigital/sage-openclaw run build");
-	// Build extension manually (its build script uses corepack which may not be available)
-	run("node scripts/sync-assets.mjs", "packages/extension");
-	run("node esbuild.config.cjs", "packages/extension");
-	// Build opencode plugin bundle used by integration tests
-	run("pnpm --filter @gendigital/sage-opencode run build");
+	// e2e/run.sh builds standalone (outside the vitest process tree, which a local EDR kills)
+	// and sets SAGE_E2E_SKIP_BUILD=1; honor it so the build runs exactly once. Default (no flag)
+	// keeps the build-then-run-in-one-process behaviour for `pnpm test:e2e:*` and CI.
+	if (process.env.SAGE_E2E_SKIP_BUILD === "1") return;
+	buildE2E();
 }

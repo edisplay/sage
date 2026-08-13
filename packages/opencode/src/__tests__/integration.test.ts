@@ -8,6 +8,7 @@
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import type { PluginScanResult } from "@gendigital/sage-core";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 const PLUGIN_DIST = resolve(__dirname, "..", "..", "dist", "index.js");
@@ -396,17 +397,21 @@ describe("OpenCode integration: Plugin scanning", { timeout: 30_000 }, () => {
 		const _plugins = await discoverOpenCodePlugins(logger);
 
 		// Plugins may include @gendigital/sage-opencode from discovery
-		// but startup-scan filters it out before scanning
+		// but startup-scan filters it out before scanning.
+		// Use an isolated, empty project dir so the clean-scan assertion isn't
+		// perturbed by whatever skills happen to live in the repo working tree.
+		const projectDir = await mkdtemp(resolve(tmpdir(), "opencode-clean-"));
 		const { createSessionScanHandler } = await import("../startup-scan.js");
-		let findingsBanner: string | null = null;
-		const handler = createSessionScanHandler(logger, process.cwd(), (banner) => {
-			findingsBanner = banner;
+		let results: PluginScanResult[] | null = null;
+		const handler = createSessionScanHandler(logger, projectDir, (r) => {
+			results = r;
 		});
 
 		await handler();
-		// Should not fail (self-exclusion logic should prevent scanning ourselves)
-		// Clean scan returns a status message (no threats)
-		expect(findingsBanner).toContain("No threats found");
+		// Should not fail (self-exclusion prevents scanning ourselves) and, with an
+		// empty project, the scan surfaces no findings.
+		expect(results).toEqual([]);
+		await rm(projectDir, { recursive: true, force: true });
 	});
 
 	it("caches clean scan results", async () => {
@@ -427,15 +432,19 @@ describe("OpenCode integration: Plugin scanning", { timeout: 30_000 }, () => {
 			error: () => {},
 		};
 
-		let findingsBanner: string | null = null;
-		const handler = createSessionScanHandler(logger, process.cwd(), (banner) => {
-			findingsBanner = banner;
+		// Isolated, empty project dir so the clean-scan assertion isn't perturbed
+		// by skills present in the repo working tree.
+		const projectDir = await mkdtemp(resolve(tmpdir(), "opencode-clean-"));
+		let results: PluginScanResult[] | null = null;
+		const handler = createSessionScanHandler(logger, projectDir, (r) => {
+			results = r;
 		});
 
 		// Just verify scan completes without error (caching is internal detail)
 		await expect(handler()).resolves.toBeUndefined();
-		// Clean scan returns a status message
-		expect(findingsBanner).toContain("No threats found");
+		// Clean scan surfaces no findings.
+		expect(results).toEqual([]);
+		await rm(projectDir, { recursive: true, force: true });
 	});
 
 	it("detects threats in malicious plugin code", async () => {
@@ -522,16 +531,18 @@ describe("OpenCode integration: Plugin scanning", { timeout: 30_000 }, () => {
 				error: () => {},
 			};
 
-			let findingsBanner: string | null = null;
-			const handler = createSessionScanHandler(logger, process.cwd(), (banner) => {
-				findingsBanner = banner;
+			let results: PluginScanResult[] | null = null;
+			const handler = createSessionScanHandler(logger, process.cwd(), (r) => {
+				results = r;
 			});
 
 			await handler();
 
-			expect(findingsBanner).toBeDefined();
-			expect(findingsBanner).toContain("Threat Detected");
-			expect(findingsBanner).toContain("suspect");
+			expect(results).toBeDefined();
+			const findings = (results ?? []).flatMap((r) => r.findings);
+			expect(findings.length).toBeGreaterThan(0);
+			// The malicious canary URL embedded in suspect.js should be flagged.
+			expect(JSON.stringify(results)).toContain("suspect");
 		} finally {
 			globalThis.fetch = originalFetch;
 		}

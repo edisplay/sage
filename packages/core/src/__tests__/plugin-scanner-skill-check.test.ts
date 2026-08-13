@@ -3,15 +3,32 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { scanPlugin } from "../plugin-scanner.js";
+import { listPending, loadPendingMarker } from "../skill-pending.js";
 import type { PluginInfo } from "../types.js";
 
 describe("scanPlugin skill-check integration", () => {
 	const originalFetch = globalThis.fetch;
 	let tempDir: string;
+	let sageDir: string;
+	let skillVerdictCachePath: string;
+	let skillPendingPath: string;
 	let plugin: PluginInfo;
+
+	// Inject isolated cache/marker paths so the scan never touches the real ~/.sage.
+	const scan = (extra: Parameters<typeof scanPlugin>[1] = {}) =>
+		scanPlugin(plugin, {
+			checkUrls: false,
+			checkFileHashes: false,
+			skillVerdictCachePath,
+			skillPendingPath,
+			...extra,
+		});
 
 	beforeEach(async () => {
 		tempDir = await mkdtemp(join(tmpdir(), "sage-plugin-skill-"));
+		sageDir = await mkdtemp(join(tmpdir(), "sage-skill-state-"));
+		skillVerdictCachePath = join(sageDir, "skill_verdict_cache.json");
+		skillPendingPath = join(sageDir, "skill_pending.json");
 		plugin = {
 			key: "test-plugin",
 			installPath: tempDir,
@@ -23,6 +40,7 @@ describe("scanPlugin skill-check integration", () => {
 	afterEach(async () => {
 		globalThis.fetch = originalFetch;
 		await rm(tempDir, { recursive: true, force: true });
+		await rm(sageDir, { recursive: true, force: true });
 	});
 
 	async function makeSkill(relPath: string, body = "stub skill body\n"): Promise<string> {
@@ -32,7 +50,7 @@ describe("scanPlugin skill-check integration", () => {
 		return dir;
 	}
 
-	it("adds SKILL_CHECK finding for HIGH risk skill (with recommendations)", async () => {
+	it("adds SKILL_CHECK finding for HIGH risk skill", async () => {
 		await makeSkill("skills/audit-website");
 
 		// Capture the skill_ids the scanner posts; the proxy answer reflects them.
@@ -50,12 +68,6 @@ describe("scanPlugin skill-check integration", () => {
 								skill_id: id,
 								verdict: "HIGH",
 								summary: "This skill executes remote code from an untrusted domain.",
-								overall_risk_level: "HIGH",
-								recommendations: [
-									"HIGH: Downloads and executes remote code",
-									"AI detected serious security threats",
-								],
-								threat_categories: ["REMOTE_CODE_EXECUTION"],
 							},
 						},
 					}),
@@ -64,11 +76,7 @@ describe("scanPlugin skill-check integration", () => {
 			return { ok: true, json: async () => ({ responses: [] }) };
 		});
 
-		const result = await scanPlugin(plugin, {
-			checkUrls: false,
-			checkFileHashes: false,
-			checkSkills: true,
-		});
+		const result = await scan({ checkSkills: true });
 
 		expect(captured).toHaveLength(1);
 		expect(captured[0]).toMatch(/^[0-9a-f]{64}$/);
@@ -80,13 +88,9 @@ describe("scanPlugin skill-check integration", () => {
 		expect(finding.severity).toBe("warning");
 		expect(finding.title).toContain("remote code");
 		expect(finding.sourceFile).toBe(join("skills", "audit-website"));
-		expect(finding.recommendations).toEqual([
-			"HIGH: Downloads and executes remote code",
-			"AI detected serious security threats",
-		]);
 	});
 
-	it("upgrades severity to critical when overall_risk_level is CRITICAL", async () => {
+	it("upgrades severity to critical when verdict is CRITICAL", async () => {
 		await makeSkill("skills/very-bad");
 
 		globalThis.fetch = vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
@@ -98,28 +102,23 @@ describe("scanPlugin skill-check integration", () => {
 					results: {
 						[id]: {
 							skill_id: id,
-							overall_risk_level: "CRITICAL",
+							verdict: "CRITICAL",
 							summary: "do not use",
-							recommendations: ["uninstall now"],
-							threat_categories: [],
 						},
 					},
 				}),
 			};
 		});
 
-		const result = await scanPlugin(plugin, {
-			checkUrls: false,
-			checkFileHashes: false,
-		});
+		const result = await scan();
 
 		const skillFindings = result.findings.filter((f) => f.threatId === "SKILL_CHECK");
 		expect(skillFindings).toHaveLength(1);
 		expect(skillFindings[0].severity).toBe("critical");
 	});
 
-	it("ignores null result (proxy has no opinion)", async () => {
-		await makeSkill("skills/safe");
+	it("queues a skill the proxy returns null for (not found → upload)", async () => {
+		const folder = await makeSkill("skills/unknown-null");
 
 		globalThis.fetch = vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
 			const body = JSON.parse(init.body as string);
@@ -130,12 +129,14 @@ describe("scanPlugin skill-check integration", () => {
 			};
 		});
 
-		const result = await scanPlugin(plugin, {
-			checkUrls: false,
-			checkFileHashes: false,
-		});
+		const result = await scan();
 
+		// null = "not found" → no finding yet, but queued for the upload worker.
 		expect(result.findings.filter((f) => f.threatId === "SKILL_CHECK")).toHaveLength(0);
+		expect(result.deferCache).toBe(true); // pending verdict → don't cache this plugin
+		const pending = listPending(await loadPendingMarker(skillPendingPath));
+		expect(pending).toHaveLength(1);
+		expect(pending[0].folder).toBe(folder);
 	});
 
 	for (const lowRisk of ["SAFE", "LOW", "MEDIUM"] as const) {
@@ -161,39 +162,37 @@ describe("scanPlugin skill-check integration", () => {
 				};
 			});
 
-			const result = await scanPlugin(plugin, {
-				checkUrls: false,
-				checkFileHashes: false,
-			});
+			const result = await scan();
 
 			expect(result.findings.filter((f) => f.threatId === "SKILL_CHECK")).toHaveLength(0);
 		});
 	}
 
-	it("fails open on proxy 500", async () => {
+	it("fails open on proxy 500 but defers caching so the lookup retries next session", async () => {
 		await makeSkill("skills/whatever");
 
 		globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 500 });
 
-		const result = await scanPlugin(plugin, {
-			checkUrls: false,
-			checkFileHashes: false,
-		});
+		const result = await scan();
 
 		expect(result.findings).toHaveLength(0);
+		// Nothing queued for upload (fail-open on outage)...
+		expect(listPending(await loadPendingMarker(skillPendingPath))).toHaveLength(0);
+		// ...but the plugin must NOT be cached as clean — the outage would
+		// otherwise suppress skill detection for the full scan-cache TTL.
+		expect(result.deferCache).toBe(true);
 	});
 
-	it("fails open on network error", async () => {
+	it("fails open on network error but defers caching so the lookup retries next session", async () => {
 		await makeSkill("skills/whatever");
 
 		globalThis.fetch = vi.fn().mockRejectedValue(new Error("offline"));
 
-		const result = await scanPlugin(plugin, {
-			checkUrls: false,
-			checkFileHashes: false,
-		});
+		const result = await scan();
 
 		expect(result.findings).toHaveLength(0);
+		expect(listPending(await loadPendingMarker(skillPendingPath))).toHaveLength(0);
+		expect(result.deferCache).toBe(true);
 	});
 
 	it("does not call the proxy when no SKILL.md folders exist", async () => {
@@ -204,10 +203,7 @@ describe("scanPlugin skill-check integration", () => {
 		const mockFetch = vi.fn();
 		globalThis.fetch = mockFetch;
 
-		const result = await scanPlugin(plugin, {
-			checkUrls: false,
-			checkFileHashes: false,
-		});
+		const result = await scan();
 
 		expect(mockFetch).not.toHaveBeenCalled();
 		expect(result.findings).toHaveLength(0);
@@ -219,11 +215,7 @@ describe("scanPlugin skill-check integration", () => {
 		const mockFetch = vi.fn();
 		globalThis.fetch = mockFetch;
 
-		const result = await scanPlugin(plugin, {
-			checkUrls: false,
-			checkFileHashes: false,
-			checkSkills: false,
-		});
+		const result = await scan({ checkSkills: false });
 
 		expect(mockFetch).not.toHaveBeenCalled();
 		expect(result.findings).toHaveLength(0);
@@ -241,23 +233,132 @@ describe("scanPlugin skill-check integration", () => {
 			for (const id of ids) {
 				results[id] = {
 					skill_id: id,
-					overall_risk_level: "HIGH",
+					verdict: "HIGH",
 					summary: "risky",
-					recommendations: ["check this"],
-					threat_categories: [],
 				};
 			}
 			return { ok: true, json: async () => ({ results }) };
 		});
 
-		const result = await scanPlugin(plugin, {
-			checkUrls: false,
-			checkFileHashes: false,
-		});
+		const result = await scan();
 
 		const skillFindings = result.findings.filter((f) => f.threatId === "SKILL_CHECK");
 		expect(skillFindings).toHaveLength(2);
 		const sources = skillFindings.map((f) => f.sourceFile).sort();
 		expect(sources).toEqual([join("skills", "alpha"), join("skills", "beta")].sort());
+	});
+
+	it("serves a cached verdict on the next scan without hitting the proxy", async () => {
+		await makeSkill("skills/cached");
+
+		// First scan: proxy returns HIGH, verdict gets cached.
+		globalThis.fetch = vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+			const body = JSON.parse(init.body as string);
+			const id = body.skill_ids[0] as string;
+			return {
+				ok: true,
+				json: async () => ({
+					results: {
+						[id]: {
+							skill_id: id,
+							verdict: "HIGH",
+							summary: "cached risk",
+						},
+					},
+				}),
+			};
+		});
+		const first = await scan();
+		expect(first.findings.filter((f) => f.threatId === "SKILL_CHECK")).toHaveLength(1);
+
+		// Second scan: proxy must NOT be called — the verdict comes from the cache.
+		const failFetch = vi.fn().mockRejectedValue(new Error("proxy should not be called"));
+		globalThis.fetch = failFetch;
+		const second = await scan();
+
+		expect(failFetch).not.toHaveBeenCalled();
+		expect(second.findings.filter((f) => f.threatId === "SKILL_CHECK")).toHaveLength(1);
+	});
+
+	it("queues a skill the proxy has never seen in the pending marker", async () => {
+		const folder = await makeSkill("skills/unknown");
+
+		// Empty results = the proxy has no record of this skill id.
+		globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ results: {} }) });
+
+		const result = await scan();
+
+		// No finding yet (unknown), but it must be queued for the upload worker.
+		expect(result.findings.filter((f) => f.threatId === "SKILL_CHECK")).toHaveLength(0);
+
+		const pending = listPending(await loadPendingMarker(skillPendingPath));
+		expect(pending).toHaveLength(1);
+		expect(pending[0].folder).toBe(folder);
+	});
+
+	it("does not re-queue a skill already pending", async () => {
+		await makeSkill("skills/unknown");
+		globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ results: {} }) });
+
+		await scan();
+		await scan(); // second scan: still unknown, but already pending
+
+		const pending = listPending(await loadPendingMarker(skillPendingPath));
+		expect(pending).toHaveLength(1); // not duplicated
+	});
+
+	it("lookup-only (uploadEnabled=false): looks up but never queues an unknown skill", async () => {
+		await makeSkill("skills/unknown");
+
+		// Proxy has no record of the skill (null) — would normally trigger an upload.
+		const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ results: {} }) });
+		globalThis.fetch = fetchMock;
+
+		const result = await scan({ uploadEnabled: false });
+
+		// The hash lookup still ran (we still check against known skills)...
+		expect(fetchMock).toHaveBeenCalled();
+		// ...but nothing is queued for upload and the plugin is not deferred.
+		expect(listPending(await loadPendingMarker(skillPendingPath))).toHaveLength(0);
+		expect(result.deferCache).toBeFalsy();
+		expect(result.findings.filter((f) => f.threatId === "SKILL_CHECK")).toHaveLength(0);
+	});
+
+	it("grace (uploadEnabled=false + deferUnknownSkills): no queue but defers cache for next session", async () => {
+		await makeSkill("skills/unknown");
+
+		// Proxy has never seen the skill (null) — would normally trigger an upload.
+		const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ results: {} }) });
+		globalThis.fetch = fetchMock;
+
+		const result = await scan({ uploadEnabled: false, deferUnknownSkills: true });
+
+		// Grace session uploads nothing...
+		expect(listPending(await loadPendingMarker(skillPendingPath))).toHaveLength(0);
+		expect(result.findings.filter((f) => f.threatId === "SKILL_CHECK")).toHaveLength(0);
+		// ...but the plugin must NOT cache as clean, or the next session (uploads
+		// active) would cache-hit it and never queue the skill (trap 1).
+		expect(result.deferCache).toBe(true);
+	});
+
+	it("lookup-only (uploadEnabled=false): still flags a known-risky skill", async () => {
+		await makeSkill("skills/known-bad");
+
+		globalThis.fetch = vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+			const body = JSON.parse(init.body as string);
+			const id = body.skill_ids[0] as string;
+			return {
+				ok: true,
+				json: async () => ({
+					results: { [id]: { skill_id: id, verdict: "CRITICAL", summary: "known bad" } },
+				}),
+			};
+		});
+
+		const result = await scan({ uploadEnabled: false });
+
+		const skillFindings = result.findings.filter((f) => f.threatId === "SKILL_CHECK");
+		expect(skillFindings).toHaveLength(1);
+		expect(skillFindings[0].severity).toBe("critical");
 	});
 });

@@ -176,7 +176,7 @@ export interface SignalSources {
 	packageCheckResults?: PackageCheckResult[];
 	amsiCheckResults?: AmsiCheckResult[];
 	piCheckResults?: PiCheckResult[];
-	/** Thresholds for PI check signal classification (from config) */
+	/** Fixed thresholds for PI check signal classification. */
 	piThresholds?: { highRisk: number; mediumRisk: number };
 }
 
@@ -334,20 +334,33 @@ export const AmsiCheckConfigSchema = z.object({
 });
 export type AmsiCheckConfig = z.infer<typeof AmsiCheckConfigSchema>;
 
+export const SkillCheckConfigSchema = z.object({
+	enabled: z.boolean().default(true),
+	cache_ttl_days: z.number().min(0).default(1),
+	/**
+	 * Upload unknown skills (never seen by the analyzer) for deep content
+	 * analysis. When false, the scan still looks skills up by content hash and
+	 * still flags known-risky ones — but no skill content ever leaves the
+	 * machine and the upload worker never runs (lookup-only mode).
+	 */
+	upload_enabled: z.boolean().default(true),
+});
+export type SkillCheckConfig = z.infer<typeof SkillCheckConfigSchema>;
+
 /**
- * Default risk-score thresholds for ML prompt-injection (PI) detection.
- * Single source of truth — schema defaults, engine fallback, pi-check
- * provider, and the eval script all reference these so they never drift.
+ * Risk-score thresholds for ML prompt-injection (PI) detection. Tuned for the
+ * bundled model; kept as constants rather than config so they can't be
+ * weakened.
  */
 export const DEFAULT_PI_HIGH_RISK_THRESHOLD = 0.99;
 export const DEFAULT_PI_MEDIUM_RISK_THRESHOLD = 0.5;
+/** Floor of the non-blocking suspicious-telemetry band `[0.95, 0.99)`. */
+export const DEFAULT_PI_TELEMETRY_THRESHOLD = 0.95;
 
 export const PiCheckConfigSchema = z.object({
 	enabled: z.boolean().default(false),
 	max_content_length: z.number().default(16384),
 	model_path: z.string().optional(),
-	high_risk_threshold: z.number().default(DEFAULT_PI_HIGH_RISK_THRESHOLD),
-	medium_risk_threshold: z.number().default(DEFAULT_PI_MEDIUM_RISK_THRESHOLD),
 });
 export type PiCheckConfig = z.infer<typeof PiCheckConfigSchema>;
 
@@ -384,6 +397,7 @@ export const ConfigSchema = z.object({
 	file_check: FileCheckConfigSchema.default({}),
 	package_check: PackageCheckConfigSchema.default({}),
 	amsi_check: AmsiCheckConfigSchema.default({}),
+	skill_check: SkillCheckConfigSchema.default({}),
 	pi_check: PiCheckConfigSchema.default({}),
 	heuristics_enabled: z.boolean().default(true),
 	cache: CacheConfigSchema.default({}),
@@ -392,6 +406,7 @@ export const ConfigSchema = z.object({
 	operational_logging: OperationalLoggingConfigSchema.default({}),
 	sensitivity: SensitivitySchema.default("balanced"),
 	disabled_threats: z.array(z.string()).default([]),
+	announce_clean_scans: z.boolean().default(true),
 	brand_key: z
 		.string()
 		.min(1)
@@ -438,6 +453,12 @@ export interface PluginFinding {
 export interface PluginScanResult {
 	plugin: PluginInfo;
 	findings: PluginFinding[];
+	/**
+	 * When true, the caller should NOT cache this result — the scan is
+	 * incomplete because a skill was queued for asynchronous upload analysis and
+	 * has no verdict yet. Re-scanning next session picks up the worker's verdict.
+	 */
+	deferCache?: boolean;
 }
 
 // ── Plugin scan cache ───────────────────────────────────────────────

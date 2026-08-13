@@ -18,6 +18,7 @@ import { type AgentRuntime, type Logger, nullLogger } from "./types.js";
 
 async function readWorkerArgs(): Promise<{
 	sageDir: string;
+	configPath?: string;
 	agentRuntime: string;
 	agentRuntimeVersion?: string;
 	versionApp?: string;
@@ -25,11 +26,12 @@ async function readWorkerArgs(): Promise<{
 } | null> {
 	const env = process.env;
 	const sageDir = env.SAGE_DIR ? resolvePath(env.SAGE_DIR) : resolvePath("~/.sage");
+	const configPath = env.SAGE_CONFIG_PATH ? resolvePath(env.SAGE_CONFIG_PATH) : undefined;
 	const agentRuntime = env.SAGE_AGENT_RUNTIME ?? "unknown";
 	const agentRuntimeVersion = env.SAGE_AGENT_RUNTIME_VERSION || undefined;
 	const versionApp = env.SAGE_VERSION_APP || undefined;
 	const schema = env.SAGE_MODEL_SCHEMA || MODEL_SCHEMA_VERSION;
-	return { sageDir, agentRuntime, agentRuntimeVersion, versionApp, schema };
+	return { sageDir, configPath, agentRuntime, agentRuntimeVersion, versionApp, schema };
 }
 
 async function createWorkerLogger(agentRuntime: string): Promise<Logger> {
@@ -75,6 +77,7 @@ async function workerMain(): Promise<void> {
 			iid,
 			agentRuntime: args.agentRuntime,
 			agentRuntimeVersion: args.agentRuntimeVersion,
+			configPath: args.configPath,
 			versionApp: args.versionApp,
 			schema: args.schema,
 			logger,

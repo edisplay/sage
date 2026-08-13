@@ -1,12 +1,24 @@
 # @gendigital/sage-opencode
 
+## 0.12.0
+
+### Minor Changes
+
+- wire the skill-upload worker into the OpenCode connector so queued unknown skills are uploaded for analysis
+
+### Patch Changes
+
+- Updated dependencies:
+  - Updated dependency `@gendigital/sage-core` to `0.12.0`
+  - Updated dependency `@gendigital/sage-mcp` to `0.12.0`
+
 ## 0.11.0
 
 ### Minor Changes
 
 - Add 13 threat rules from [ATR (Agent Threat Rules)](https://github.com/Agent-Threat-Rule/agent-threat-rules) under MIT (ATR project). In `prompt-injection.yaml`: 4 rules (CLT-PI-052 MCP IMPORTANT-tag shadowing, CLT-PI-091 HTML-comment delivery, CLT-PI-092 jailbreak persona, CLT-PI-093 CJK pivot). In `agent-layer.yaml`: 9 rules covering MCP path traversal (CLT-MCP-004), skill-package compromise (CLT-SKL-001/002/004/005/006/008: mandatory override, base64 payload, hidden comment exfil, Unicode Tag smuggling, compound archival exfil, auto-approve rider), PEM key leak (CLT-CTX-003), and MCP filesystem typosquatting (CLT-SUPPLY-002). All rules match `content` artifacts (Write/Edit content and plugin/skill file scans).
 
-- Section 5 quick fixes: MCP false-positive tools for OpenCode/OpenClaw, dead code removal, and docs cleanup.
+- MCP false-positive tools for OpenCode/OpenClaw, dead code removal, and docs cleanup.
   **MCP false-positive tools on OpenCode and OpenClaw**
 
   - OpenCode: plugin now auto-registers the Sage MCP server via a `config` hook (before MCP init). `sage_report_false_positive` and `sage_list_audit_entries` are available without any user configuration.
@@ -56,7 +68,7 @@
 
 ### Patch Changes
 
-- Address agentic review findings: engine cleanup, directory rename, and correctness fixes.
+- Engine cleanup, directory rename, and correctness fixes.
   **Engine cleanup**
 
   - Remove dead `decision` field from internal `Signal` interface; per-signal `applyPolicy` calls were computed and stored but never read — the final decision is derived once from `max(confidences)`.
@@ -71,10 +83,10 @@
   - `custom_allowlist_path` detection: fix false negative where a non-default `trustedDomainsDir` was not recognised as the custom-path variant.
   - Threat loader: validate `confidence` at load time (reject rules with values outside `[0,1]`); fix OpenClaw plugin migration race on concurrent session starts.
   - Heuristic pre-filter: clarify in comments and docs that skipping allow results is semantically safe (allow heuristics never fire on allow-path inputs).
-    **PR review follow-up**
+    **Additional correctness fixes**
   - `applyPolicy` now fails open on out-of-range confidence: logs a warning and returns `allow` instead of throwing `RangeError`. Unifies behavior with `threat-loader.ts` (which already log+skips invalid YAML rules) and preserves the audit trail when a future signal source feeds bad data.
   - Package cache replay: when cached `packageVerdict`/`packageConfidence` are invalid, the entry is treated as a cache miss and re-queried live instead of synthesizing a fallback verdict. Cache entries are version-scoped, so legacy entries written before these fields existed are evicted on version bump.
-  - Docs: scrub legacy vendor reference from `decision-pipeline.md` and `plugin-scanner.ts` jsdoc; reword "threat author" → "threat rule author".
+  - Docs: terminology consistency pass on `decision-pipeline.md` and `plugin-scanner.ts` jsdoc; reword "threat author" → "threat rule author".
 
 - Updated dependencies:
   - Updated dependency `@gendigital/sage-core` to `0.11.0`

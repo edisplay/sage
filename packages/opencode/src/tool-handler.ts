@@ -3,6 +3,8 @@ import {
 	type Branding,
 	type CanonicalToolType,
 	canonicalizeToolName,
+	captureEnabled,
+	captureHookInput,
 	defaultBranding,
 	formatDenyMessage,
 	guardToolCall,
@@ -10,7 +12,7 @@ import {
 	summarizeArtifacts,
 } from "@gendigital/sage-core";
 
-const OPENCODE_TOOL_MAP: Record<string, CanonicalToolType> = {
+export const OPENCODE_TOOL_MAP: Record<string, CanonicalToolType> = {
 	bash: "Bash",
 	webfetch: "WebFetch",
 	write: "Write",
@@ -92,6 +94,24 @@ export function createToolHandlers(
 
 		try {
 			const args = output.args ?? {};
+
+			// E2E payload-drift capture (drift loop). OpenCode is an in-process
+			// ESM plugin (not MCP, not a CJS hook), so the "raw wire" payload is the
+			// in-proc tool-call shape OpenCode hands us. Namespaced opencode-* so it
+			// can't collide with other agents sharing SAGE_E2E_CAPTURE_DIR. Inert in
+			// production (env unset); fail-open inside captureHookInput.
+			if (captureEnabled()) {
+				await captureHookInput(
+					"PreToolUse",
+					{ tool: input.tool, sessionID: input.sessionID, callID: input.callID, args },
+					{
+						toolName: canonicalizeToolName(OPENCODE_TOOL_MAP, input.tool),
+						toolInput: normalizeToolInput(input.tool, args),
+					},
+					{ filePrefix: "opencode-" },
+				);
+			}
+
 			const artifacts = extractFromOpenCodeTool(input.tool, args);
 
 			if (!artifacts || artifacts.length === 0) {

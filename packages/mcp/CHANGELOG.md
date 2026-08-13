@@ -1,5 +1,12 @@
 # @gendigital/sage-mcp
 
+## 0.12.0
+
+### Patch Changes
+
+- Updated dependencies:
+  - Updated dependency `@gendigital/sage-core` to `0.12.0`
+
 ## 0.11.0
 
 ### Minor Changes

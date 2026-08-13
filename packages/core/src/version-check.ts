@@ -5,8 +5,9 @@
  */
 
 import { resolveEndpoint } from "./clients/url-check.js";
+import { loadConfig } from "./config.js";
 import { loadExtendedInfo, mergeExtendedInfo } from "./extended-info.js";
-import { buildSageProxyEnvelope } from "./sage-proxy.js";
+import { buildSageProxyEnvelope, type SageUserConfigInput } from "./sage-proxy.js";
 import type { AgentRuntime, Logger } from "./types.js";
 import { nullLogger } from "./types.js";
 
@@ -17,6 +18,15 @@ export interface VersionCheckContext {
 	agentRuntime: AgentRuntime;
 	agentRuntimeVersion?: string;
 	iid: string;
+	/**
+	 * Active Sage user config to include in the telemetry envelope.
+	 * When provided, no config file read is needed in this function.
+	 */
+	config?: SageUserConfigInput;
+	/**
+	 * Optional explicit config path used only when `config` is not provided.
+	 */
+	configPath?: string;
 }
 
 export interface VersionCheckResult {
@@ -68,12 +78,22 @@ export async function checkForUpdate(
 			logger.debug("Skipping version check: missing installation id");
 			return null;
 		}
+		let config: SageUserConfigInput | undefined = context.config;
+		if (!config) {
+			try {
+				config = await loadConfig(context.configPath, logger);
+			} catch (err) {
+				// Fail-open: keep version-check available even if config loading fails.
+				logger.debug(`Version check config load failed: ${err}`);
+			}
+		}
 
 		const envelope = buildSageProxyEnvelope({
 			iid: context.iid,
 			versionApp: currentVersion,
 			agentRuntime: context.agentRuntime,
 			agentRuntimeVersion: context.agentRuntimeVersion ?? "unknown",
+			config,
 		});
 		// Optional extended-info enrichment. Fail-open: any error inside the
 		// loader yields `null`, leaving the envelope unchanged.

@@ -240,7 +240,7 @@ export async function handlePostToolUseHook(
 		config.sensitivity !== "relaxed"
 	) {
 		try {
-			const piWarning = await findPiWarningInAuditLog(config.logging, toolUseId, config.pi_check);
+			const piWarning = await findPiWarningInAuditLog(config.logging, toolUseId);
 			if (piWarning) {
 				contextParts.push(`🛡️ ${formatPiWarning(piWarning, branding)}`);
 			}

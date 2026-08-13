@@ -1,6 +1,8 @@
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+	agentRuntimeLabel,
+	foreignSourceRuntime,
 	formatStatusLine,
 	initSessionStatus,
 	pruneSessionStatusFiles,
@@ -119,6 +121,27 @@ describe("initSessionStatus", () => {
 		const status = await readSessionStatus("init2");
 		expect(status?.denied).toBe(1);
 	});
+
+	it("stamps startedAt with a parsable timestamp", async () => {
+		await initSessionStatus("init3");
+
+		const status = await readSessionStatus("init3");
+		expect(status?.startedAt).toBeDefined();
+		expect(Number.isNaN(Date.parse(status?.startedAt ?? ""))).toBe(false);
+	});
+
+	it("preserves startedAt across updateSessionStatus calls", async () => {
+		await initSessionStatus("init4");
+		const before = (await readSessionStatus("init4"))?.startedAt;
+
+		await updateSessionStatus("init4", makeVerdict({ decision: "deny" }));
+		await updateSessionStatus("init4", makeVerdict({ decision: "ask" }));
+
+		const after = await readSessionStatus("init4");
+		expect(after?.startedAt).toBe(before);
+		expect(after?.denied).toBe(1);
+		expect(after?.flagged).toBe(1);
+	});
 });
 
 describe("readSessionStatus", () => {
@@ -172,6 +195,88 @@ describe("formatStatusLine", () => {
 
 	it("omits detail when reason is null", () => {
 		expect(formatStatusLine(1, 0, null, "malware")).toBe("🛡️ Sage: 1 blocked");
+	});
+
+	it("names a single risky skill", () => {
+		expect(formatStatusLine(0, 0, null, null, undefined, { count: 1, names: ["evil-skill"] })).toBe(
+			"🛡️ Sage: ⚠️ 1 malicious skill (evil-skill)",
+		);
+	});
+
+	it("lists all names when summarizing multiple", () => {
+		expect(
+			formatStatusLine(0, 0, null, null, undefined, {
+				count: 3,
+				names: ["alpha", "beta", "gamma"],
+			}),
+		).toBe("🛡️ Sage: ⚠️ 3 malicious skills (alpha, beta, gamma)");
+	});
+
+	it("truncates the name list with ',...' once it exceeds the char limit", () => {
+		const line = formatStatusLine(0, 0, null, null, undefined, {
+			count: 8,
+			names: ["skill-a", "skill-b", "skill-c", "skill-d", "skill-e", "skill-f", "skill-g"],
+		});
+		expect(line).toBe(
+			"🛡️ Sage: ⚠️ 8 malicious skills (skill-a, skill-b, skill-c, skill-d, skill-e,...)",
+		);
+		expect(line).not.toContain("skill-f");
+		expect(line).not.toContain("\n");
+	});
+
+	it("keeps a single over-long name without a truncation marker", () => {
+		const longName = "a".repeat(80);
+		expect(formatStatusLine(0, 0, null, null, undefined, { count: 1, names: [longName] })).toBe(
+			`🛡️ Sage: ⚠️ 1 malicious skill (${longName})`,
+		);
+	});
+
+	it("omits the name list when no names are known", () => {
+		expect(formatStatusLine(0, 0, null, null, undefined, { count: 2, names: [] })).toBe(
+			"🛡️ Sage: ⚠️ 2 malicious skills",
+		);
+	});
+
+	it("skill warning replaces detection counters", () => {
+		expect(
+			formatStatusLine(2, 1, "Pipe-to-shell detected", "malware", undefined, {
+				count: 1,
+				names: ["evil-skill"],
+			}),
+		).toBe("🛡️ Sage: ⚠️ 1 malicious skill (evil-skill)");
+	});
+});
+
+describe("foreignSourceRuntime", () => {
+	it("returns undefined when the current runtime is among the sources", () => {
+		expect(
+			foreignSourceRuntime(
+				[{ agentRuntime: "cursor" }, { agentRuntime: "claude-code" }],
+				"claude-code",
+			),
+		).toBeUndefined();
+	});
+
+	it("returns the first foreign runtime when the verdict is purely foreign", () => {
+		expect(
+			foreignSourceRuntime(
+				[{ containerKey: "skill:x@local" }, { agentRuntime: "cursor" }],
+				"vscode",
+			),
+		).toBe("cursor");
+	});
+
+	it("returns undefined for missing or empty sources", () => {
+		expect(foreignSourceRuntime(undefined, "cursor")).toBeUndefined();
+		expect(foreignSourceRuntime([], "cursor")).toBeUndefined();
+	});
+});
+
+describe("agentRuntimeLabel", () => {
+	it("maps known runtimes and passes unknown ids through", () => {
+		expect(agentRuntimeLabel("claude-code")).toBe("Claude Code");
+		expect(agentRuntimeLabel("vscode")).toBe("VS Code");
+		expect(agentRuntimeLabel("something-new")).toBe("something-new");
 	});
 });
 

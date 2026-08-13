@@ -2,6 +2,13 @@ import { homedir } from "node:os";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type MockConfig = {
+	sensitivity: string;
+	url_check: { enabled: boolean };
+	file_check: { enabled: boolean };
+	package_check: { enabled: boolean };
+	heuristics_enabled: boolean;
+	pi_check: { enabled: boolean };
+	community_iq: boolean;
 	logging: {
 		enabled: boolean;
 		log_clean: boolean;
@@ -16,6 +23,7 @@ type SageProxyEnvelopeArgs = {
 	versionApp: string;
 	agentRuntime: string;
 	agentRuntimeVersion: string;
+	config?: MockConfig;
 };
 
 type DryRunPayload = {
@@ -46,6 +54,13 @@ type DryRunResponse = { endpoint: string; reports: Array<{ payload: DryRunPayloa
 
 const mockLoadConfig = vi.fn(
 	async (): Promise<MockConfig> => ({
+		sensitivity: "balanced",
+		url_check: { enabled: true },
+		file_check: { enabled: true },
+		package_check: { enabled: true },
+		heuristics_enabled: true,
+		pi_check: { enabled: false },
+		community_iq: true,
 		logging: {
 			enabled: true,
 			log_clean: false,
@@ -114,6 +129,19 @@ vi.mock("@gendigital/sage-core", () => ({
 			agent_runtime: args.agentRuntime,
 			agent_runtime_version: args.agentRuntimeVersion,
 		},
+		...(args.config
+			? {
+					config: {
+						sensitivity: args.config.sensitivity,
+						url_check_enabled: args.config.url_check.enabled,
+						file_check_enabled: args.config.file_check.enabled,
+						package_check_enabled: args.config.package_check.enabled,
+						heuristics_enabled: args.config.heuristics_enabled,
+						pi_check_enabled: args.config.pi_check.enabled,
+						community_iq_enabled: args.config.community_iq,
+					},
+				}
+			: {}),
 	}),
 	resolveEndpoint: (path: string) =>
 		`https://sage-proxy.svc.avast.com${path.startsWith("/") ? path : `/${path}`}`,
@@ -223,6 +251,15 @@ describe("sage_report_false_positive", () => {
 		expect(payload.platform.architecture).toBeTruthy();
 		expect(payload.agent.agent_runtime).toBe("cursor");
 		expect(payload.agent.agent_runtime_version).toBe("0.48.7");
+		expect(payload.config).toEqual({
+			sensitivity: "balanced",
+			url_check_enabled: true,
+			file_check_enabled: true,
+			package_check_enabled: true,
+			heuristics_enabled: true,
+			pi_check_enabled: false,
+			community_iq_enabled: true,
+		});
 		expect(payload.block_event.tool_type).toBe("Bash");
 		expect(payload.block_event.hook_type).toBe("PreToolUse");
 		expect(payload.block_event.user_action).toBe("blocked");
@@ -579,6 +616,15 @@ describe("sage_report_false_positive", () => {
 		expect(payload.identity).toEqual({ uuid: "550e8400-e29b-41d4-a716-446655440000" });
 		expect(payload.license).toBeUndefined();
 		expect(payload.product.extra_id).toBeUndefined();
+		expect(payload.config).toEqual({
+			sensitivity: "balanced",
+			url_check_enabled: true,
+			file_check_enabled: true,
+			package_check_enabled: true,
+			heuristics_enabled: true,
+			pi_check_enabled: false,
+			community_iq_enabled: true,
+		});
 	});
 
 	it("never overwrites Sage-set envelope fields when extended-info collides", async () => {

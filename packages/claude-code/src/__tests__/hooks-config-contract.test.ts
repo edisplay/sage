@@ -17,6 +17,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { normalizeClaudeHookInput } from "../mcp-hook-tools.js";
+import { loadEnvelope, withOverrides } from "./contract-fixtures.js";
 
 const HOOKS_JSON_PATH = resolve(__dirname, "..", "..", "..", "..", "hooks", "hooks.json");
 
@@ -125,20 +126,7 @@ describe("hooks.json round-trip parity with command-hook stdin", () => {
 
 	it("PreToolUse: templated args normalize back to the original hook event", () => {
 		const hook = loadMcpToolHook("PreToolUse");
-		const event = {
-			session_id: "sess-parity-1",
-			transcript_path: "/tmp/transcripts/sess-parity-1.jsonl",
-			cwd: "/repo/project",
-			permission_mode: "default",
-			hook_event_name: "PreToolUse",
-			tool_name: "Bash",
-			tool_use_id: "toolu_parity_pre",
-			tool_input: {
-				command: "echo hello",
-				description: "Print a greeting",
-				timeout: 5000,
-			},
-		};
+		const event = loadEnvelope("pre-tool-use");
 
 		const normalized = normalizeClaudeHookInput(simulateTemplating(hook, event));
 
@@ -147,25 +135,7 @@ describe("hooks.json round-trip parity with command-hook stdin", () => {
 
 	it("PostToolUse: templated args normalize back to the original hook event", () => {
 		const hook = loadMcpToolHook("PostToolUse");
-		const event = {
-			session_id: "sess-parity-2",
-			transcript_path: "/tmp/transcripts/sess-parity-2.jsonl",
-			cwd: "/repo/project",
-			permission_mode: "acceptEdits",
-			hook_event_name: "PostToolUse",
-			tool_name: "Read",
-			tool_use_id: "toolu_parity_post",
-			tool_input: {
-				file_path: "/repo/project/README.md",
-				offset: 1,
-				limit: 100,
-			},
-			tool_response: {
-				content: "# Project\n\nSome readme content.",
-				truncated: false,
-			},
-			duration_ms: 123,
-		};
+		const event = loadEnvelope("post-tool-use");
 
 		const normalized = normalizeClaudeHookInput(simulateTemplating(hook, event));
 
@@ -174,18 +144,17 @@ describe("hooks.json round-trip parity with command-hook stdin", () => {
 
 	it("PostToolUse: a plain-string tool_response is preserved as tool_output for content scanning", () => {
 		const hook = loadMcpToolHook("PostToolUse");
-		const event = {
+		// A raw (non-JSON) tool_response is the WebFetch-style variant of the canonical
+		// PostToolUse envelope; only the fields that differ are overridden here.
+		const event = withOverrides(loadEnvelope("post-tool-use"), {
 			session_id: "sess-parity-3",
-			transcript_path: "/tmp/transcripts/sess-parity-3.jsonl",
-			cwd: "/repo/project",
 			permission_mode: "default",
-			hook_event_name: "PostToolUse",
 			tool_name: "WebFetch",
 			tool_use_id: "toolu_parity_raw",
 			tool_input: { url: "https://example.com" },
 			tool_response: "raw page text that is not JSON",
 			duration_ms: 45,
-		};
+		});
 
 		const normalized = normalizeClaudeHookInput(simulateTemplating(hook, event));
 

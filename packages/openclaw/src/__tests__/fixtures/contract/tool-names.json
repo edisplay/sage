@@ -1,0 +1,12 @@
+{
+	"openclaw": {
+		"bash": "Bash",
+		"exec": "Bash",
+		"web_fetch": "WebFetch",
+		"write": "Write",
+		"edit": "Edit",
+		"read": "Read",
+		"apply_patch": "ApplyPatch"
+	},
+	"openclawToolNames": ["exec", "write", "web_fetch"]
+}

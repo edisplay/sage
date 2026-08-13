@@ -34,6 +34,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 
 // ../core/dist/file-utils.js
+function getFileContent(path, encoding = "utf-8") {
+  return fsPromises[name1 + name2](path, encoding);
+}
 function getFileContentSync(path, encoding = "utf-8") {
   return fs[`${name1 + name2}Sync`](path, encoding);
 }
@@ -43,11 +46,12 @@ function getProcEnv() {
 function getHomeDir() {
   return getProcEnv().HOME || (0, import_node_os.homedir)();
 }
-var fs, import_node_os, name1, name2;
+var fs, fsPromises, import_node_os, name1, name2;
 var init_file_utils = __esm({
   "../core/dist/file-utils.js"() {
     "use strict";
     fs = __toESM(require("node:fs"), 1);
+    fsPromises = __toESM(require("node:fs/promises"), 1);
     import_node_os = require("node:os");
     name1 = "read";
     name2 = "File";
@@ -4161,7 +4165,7 @@ var init_zod = __esm({
 });
 
 // ../core/dist/types.js
-var nullLogger, ArtifactTypeSchema, ArtifactSchema, VerdictSeveritySchema, ThreatSchema, DecisionSchema, SensitivitySchema, UrlCheckConfigSchema, CacheConfigSchema, LoggingConfigSchema, OperationalLogLevelSchema, OperationalLoggingConfigSchema, FileCheckConfigSchema, PackageCheckConfigSchema, AmsiCheckConfigSchema, DEFAULT_PI_HIGH_RISK_THRESHOLD, DEFAULT_PI_MEDIUM_RISK_THRESHOLD, PiCheckConfigSchema, ExceptionDecisionSchema, ExceptionMatchSchema, ExceptionRuleSchema, ExceptionsFileSchema, ExceptionsConfigSchema, ConfigSchema, HookTypeSchema;
+var nullLogger, ArtifactTypeSchema, ArtifactSchema, VerdictSeveritySchema, ThreatSchema, DecisionSchema, SensitivitySchema, UrlCheckConfigSchema, CacheConfigSchema, LoggingConfigSchema, OperationalLogLevelSchema, OperationalLoggingConfigSchema, FileCheckConfigSchema, PackageCheckConfigSchema, AmsiCheckConfigSchema, SkillCheckConfigSchema, PiCheckConfigSchema, ExceptionDecisionSchema, ExceptionMatchSchema, ExceptionRuleSchema, ExceptionsFileSchema, ExceptionsConfigSchema, ConfigSchema, HookTypeSchema;
 var init_types2 = __esm({
   "../core/dist/types.js"() {
     "use strict";
@@ -4238,14 +4242,21 @@ var init_types2 = __esm({
     AmsiCheckConfigSchema = external_exports.object({
       enabled: external_exports.boolean().default(true)
     });
-    DEFAULT_PI_HIGH_RISK_THRESHOLD = 0.99;
-    DEFAULT_PI_MEDIUM_RISK_THRESHOLD = 0.5;
+    SkillCheckConfigSchema = external_exports.object({
+      enabled: external_exports.boolean().default(true),
+      cache_ttl_days: external_exports.number().min(0).default(1),
+      /**
+       * Upload unknown skills (never seen by the analyzer) for deep content
+       * analysis. When false, the scan still looks skills up by content hash and
+       * still flags known-risky ones — but no skill content ever leaves the
+       * machine and the upload worker never runs (lookup-only mode).
+       */
+      upload_enabled: external_exports.boolean().default(true)
+    });
     PiCheckConfigSchema = external_exports.object({
       enabled: external_exports.boolean().default(false),
       max_content_length: external_exports.number().default(16384),
-      model_path: external_exports.string().optional(),
-      high_risk_threshold: external_exports.number().default(DEFAULT_PI_HIGH_RISK_THRESHOLD),
-      medium_risk_threshold: external_exports.number().default(DEFAULT_PI_MEDIUM_RISK_THRESHOLD)
+      model_path: external_exports.string().optional()
     });
     ExceptionDecisionSchema = external_exports.enum(["allow", "deny"]);
     ExceptionMatchSchema = external_exports.enum(["executable", "domain", "path", "plugin", "regex"]);
@@ -4267,6 +4278,7 @@ var init_types2 = __esm({
       file_check: FileCheckConfigSchema.default({}),
       package_check: PackageCheckConfigSchema.default({}),
       amsi_check: AmsiCheckConfigSchema.default({}),
+      skill_check: SkillCheckConfigSchema.default({}),
       pi_check: PiCheckConfigSchema.default({}),
       heuristics_enabled: external_exports.boolean().default(true),
       cache: CacheConfigSchema.default({}),
@@ -4275,6 +4287,7 @@ var init_types2 = __esm({
       operational_logging: OperationalLoggingConfigSchema.default({}),
       sensitivity: SensitivitySchema.default("balanced"),
       disabled_threats: external_exports.array(external_exports.string()).default([]),
+      announce_clean_scans: external_exports.boolean().default(true),
       brand_key: external_exports.string().min(1).max(32).regex(/^[a-z0-9_-]+$/u).optional(),
       community_iq: external_exports.boolean().default(true)
     });
@@ -4364,7 +4377,7 @@ function sanitizeBrandKey(data, logger) {
   if (typeof brandKey === "string" && brandKey.length >= 1 && brandKey.length <= 32 && BRAND_KEY_RE.test(brandKey)) {
     return data;
   }
-  logger.warn(`Invalid brand_key in config \u2014 ignoring`, { brand_key: brandKey });
+  logger.warn(`Invalid brand_key in config - ignoring`, { brand_key: brandKey });
   const { brand_key: _, ...rest } = data;
   return rest;
 }
@@ -4416,6 +4429,21 @@ function parseConfig(raw, path, logger) {
     return defaultConfig(logger);
   }
 }
+async function readExplicitSkillUploadEnabled(configPath, logger = nullLogger) {
+  const path = configPath ? resolvePath(configPath) : defaultConfigPath();
+  try {
+    const data = JSON.parse(await getFileContent(path));
+    const skillCheck = data.skill_check;
+    if (skillCheck && typeof skillCheck === "object" && !Array.isArray(skillCheck) && "upload_enabled" in skillCheck) {
+      const value = skillCheck.upload_enabled;
+      if (typeof value === "boolean")
+        return { present: true, value };
+      logger.warn("Config skill_check.upload_enabled is not a boolean; ignoring", { value });
+    }
+  } catch {
+  }
+  return { present: false, value: false };
+}
 function loadConfigSync(configPath, logger = nullLogger) {
   const path = configPath ? resolvePath(configPath) : defaultConfigPath();
   try {
@@ -4424,7 +4452,7 @@ function loadConfigSync(configPath, logger = nullLogger) {
     return defaultConfig(logger);
   }
 }
-var import_node_path, SAGE_DIR, BRAND_KEY_RE;
+var import_node_path, SAGE_DIR, MS_PER_DAY, CLOCK_SKEW_TOLERANCE_MS, BRAND_KEY_RE;
 var init_config = __esm({
   "../core/dist/config.js"() {
     "use strict";
@@ -4432,6 +4460,8 @@ var init_config = __esm({
     init_file_utils();
     init_types2();
     SAGE_DIR = "~/.sage";
+    MS_PER_DAY = 24 * 60 * 60 * 1e3;
+    CLOCK_SKEW_TOLERANCE_MS = 5 * 60 * 1e3;
     BRAND_KEY_RE = /^[a-z0-9_-]+$/u;
   }
 });
@@ -13665,7 +13695,7 @@ var require_dist = __commonJS({
 
 // src/sage-statusline.ts
 var import_node_fs = require("node:fs");
-var import_node_path5 = require("node:path");
+var import_node_path6 = require("node:path");
 
 // ../core/dist/brands.js
 var defaultBranding = { name: "Sage", short_name: "Sage" };
@@ -13677,7 +13707,7 @@ function resolveBranding(brandKey, logger) {
     return defaultBranding;
   const entry = BRANDS[brandKey];
   if (!entry) {
-    logger?.warn(`Unknown brand_key "${brandKey}" in config \u2014 using default branding`);
+    logger?.warn(`Unknown brand_key "${brandKey}" in config - using default branding`);
     return defaultBranding;
   }
   return { ...entry, brand_key: brandKey };
@@ -13693,10 +13723,26 @@ var APPROVED_TTL_MS = 10 * 60 * 1e3;
 
 // ../core/dist/audit-log.js
 init_config();
+
+// ../core/dist/content-snapshot.js
+var CONTENT_FIELD_LIMITS = Object.freeze({
+  command: 512,
+  url: 512,
+  file_path: 512,
+  package_name: 256,
+  package_version: 128,
+  package_registry: 128
+});
+
+// ../core/dist/audit-log.js
 init_file_utils();
 
 // ../core/dist/jsonl-log-writer.js
 init_config();
+init_file_utils();
+
+// ../core/dist/audit-log.js
+init_types2();
 
 // ../core/dist/cache.js
 init_config();
@@ -13858,7 +13904,7 @@ init_file_utils();
 var import_meta = {};
 function resolveVersion() {
   if (true)
-    return "0.11.0";
+    return "0.12.0";
   try {
     const pkgPath = (0, import_node_path2.join)((0, import_node_path2.dirname)((0, import_node_url.fileURLToPath)(import_meta.url)), "..", "package.json");
     const pkg = JSON.parse(getFileContentSync(pkgPath));
@@ -13878,6 +13924,7 @@ init_types2();
 var STALE_LOCK_MS = 60 * 60 * 1e3;
 
 // ../core/dist/clients/model-manifest.js
+init_config();
 init_types2();
 
 // ../core/dist/clients/url-check.js
@@ -13893,26 +13940,23 @@ init_types2();
 // ../core/dist/index.js
 init_pi_deps_installer();
 
+// ../core/dist/clients/skill-analyze.js
+init_types2();
+
 // ../core/dist/clients/skill-check.js
 init_types2();
 
 // ../core/dist/index.js
 init_config();
 
+// ../core/dist/config-defaults.js
+init_file_utils();
+init_types2();
+
 // ../core/dist/config-diagnostics.js
 init_config();
 init_file_utils();
 init_types2();
-
-// ../core/dist/content-snapshot.js
-var CONTENT_FIELD_LIMITS = Object.freeze({
-  command: 512,
-  url: 512,
-  file_path: 512,
-  package_name: 256,
-  package_version: 128,
-  package_registry: 128
-});
 
 // ../core/dist/extended-info.js
 init_file_utils();
@@ -13924,6 +13968,9 @@ init_file_utils();
 
 // ../core/dist/detection-telemetry.js
 init_types2();
+
+// ../core/dist/e2e-capture.js
+var CAPTURE_MAX_BYTES = 10 * 1024 * 1024;
 
 // ../core/dist/policy.js
 init_types2();
@@ -13955,11 +14002,46 @@ init_types2();
 // ../core/dist/statusline.js
 init_config();
 init_file_utils();
+function foreignSourceRuntime(sources, currentRuntime) {
+  if (!sources?.length)
+    return void 0;
+  if (sources.some((s) => s.agentRuntime === currentRuntime))
+    return void 0;
+  return sources.find((s) => s.agentRuntime)?.agentRuntime;
+}
 function sanitizeSessionId(sessionId) {
   return sessionId.replace(/[^a-zA-Z0-9-]/g, "_");
 }
-function formatStatusLine(denied, flagged, lastReason, lastCategory, branding = defaultBranding) {
+var SKILL_NAMES_MAX_CHARS = 50;
+function joinNamesWithLimit(names, maxChars) {
+  const kept = [];
+  let length = 0;
+  for (const name of names) {
+    const addition = kept.length === 0 ? name : `, ${name}`;
+    if (kept.length > 0 && length + addition.length > maxChars) {
+      return `${kept.join(", ")},...`;
+    }
+    kept.push(name);
+    length += addition.length;
+  }
+  return kept.join(", ");
+}
+function formatSkillWarning(warning) {
+  const noun = warning.count === 1 ? "malicious skill" : "malicious skills";
+  const names = joinNamesWithLimit(warning.names, SKILL_NAMES_MAX_CHARS);
+  if (!names) {
+    return `\u26A0\uFE0F ${warning.count} ${noun}`;
+  }
+  return `\u26A0\uFE0F ${warning.count} ${noun} (${names})`;
+}
+function formatStatusLine(denied, flagged, lastReason, lastCategory, branding = defaultBranding, skillWarning) {
   const name = branding.name;
+  let line;
+  if (skillWarning && skillWarning.count > 0) {
+    line = `\u{1F6E1}\uFE0F ${name}:`;
+    line += ` ${formatSkillWarning(skillWarning)}`;
+    return line;
+  }
   if (denied > 0 || flagged > 0) {
     const parts = [];
     if (denied > 0)
@@ -13967,9 +14049,11 @@ function formatStatusLine(denied, flagged, lastReason, lastCategory, branding = 
     if (flagged > 0)
       parts.push(`${flagged} flagged`);
     const detail = lastReason ? ` \u2014 ${lastReason}${lastCategory ? ` (${lastCategory})` : ""}` : "";
-    return `\u{1F6E1}\uFE0F ${name}: ${parts.join(", ")}${detail}`;
+    line = `\u{1F6E1}\uFE0F ${name}: ${parts.join(", ")}${detail}`;
+  } else {
+    line = `\u{1F6E1}\uFE0F ${name}: \u2705`;
   }
-  return `\u{1F6E1}\uFE0F ${name}: \u2705`;
+  return line;
 }
 
 // ../core/dist/threat-loader.js
@@ -13987,22 +14071,119 @@ init_file_utils();
 init_config();
 init_types2();
 
+// ../core/dist/install-state.js
+init_config();
+init_file_utils();
+
+// ../core/dist/notices.js
+init_config();
+var SKILL_UPLOAD_NOTICE = {
+  id: "skill_upload_v1",
+  body: () => [
+    "unknown skills \u2014 each skill's SKILL.md and every supporting file in its",
+    "folder \u2014 will be uploaded and checked against potential malicious artifacts",
+    "starting next session. To keep skill content on this machine, set",
+    '"skill_check": { "upload_enabled": false } in ~/.sage/config.json.'
+  ],
+  // Suppressed once the user has explicitly set upload_enabled either way: an
+  // explicit choice needs no consent prompt (the rollout obeys it directly).
+  isEligible: async ({ configPath, logger }) => !(await readExplicitSkillUploadEnabled(configPath, logger)).present
+};
+var NOTICES = {
+  [SKILL_UPLOAD_NOTICE.id]: SKILL_UPLOAD_NOTICE
+};
+
+// ../core/dist/install-state.js
+init_types2();
+var SKILL_UPLOAD_NOTICE_ID = SKILL_UPLOAD_NOTICE.id;
+
 // ../core/dist/model-download.js
 init_types2();
 
 // ../core/dist/plugin-scan-cache.js
 var import_node_path3 = require("node:path");
+init_config();
 init_file_utils();
 init_types2();
 var DEFAULT_CACHE_PATH = (0, import_node_path3.join)(getHomeDir(), ".sage", "plugin_scan_cache.json");
 
 // ../core/dist/plugin-scanner.js
+var import_node_path5 = require("node:path");
+init_config();
+init_file_utils();
+
+// ../core/dist/skill-id.js
+var MAX_SKILL_BYTES = 50 * 1024 * 1024;
+
+// ../core/dist/skill-pending.js
+init_config();
+init_file_utils();
+init_types2();
+var PENDING_TTL_MS = 60 * 60 * 1e3;
+
+// ../core/dist/skill-verdict-cache.js
 var import_node_path4 = require("node:path");
 init_config();
 init_file_utils();
 init_types2();
+function parseSources(raw) {
+  if (!Array.isArray(raw))
+    return void 0;
+  const sources = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object")
+      continue;
+    const entry = item;
+    const source = {
+      agentRuntime: typeof entry.agent_runtime === "string" ? entry.agent_runtime : void 0,
+      containerKey: typeof entry.container_key === "string" ? entry.container_key : void 0
+    };
+    if (source.agentRuntime || source.containerKey)
+      sources.push(source);
+  }
+  return sources.length > 0 ? sources : void 0;
+}
+function defaultCachePath2() {
+  return (0, import_node_path4.join)(resolvePath(SAGE_DIR), "skill_verdict_cache.json");
+}
+function loadSkillVerdictCacheSync(cachePath = defaultCachePath2()) {
+  try {
+    const data = JSON.parse(getFileContentSync(cachePath));
+    const rawEntries = data.entries ?? {};
+    const entries = {};
+    for (const [skillId, entry] of Object.entries(rawEntries)) {
+      const analyzedAt = entry.analyzed_at;
+      if (typeof analyzedAt !== "string")
+        continue;
+      entries[skillId] = {
+        verdict: typeof entry.verdict === "string" ? entry.verdict : void 0,
+        summary: typeof entry.summary === "string" ? entry.summary : void 0,
+        skillName: typeof entry.skill_name === "string" ? entry.skill_name : void 0,
+        sources: parseSources(entry.sources),
+        analyzedAt
+      };
+    }
+    return { entries };
+  } catch {
+    return { entries: {} };
+  }
+}
+function riskyVerdictsSince(cache, sinceIso) {
+  const since = Date.parse(sinceIso);
+  if (Number.isNaN(since))
+    return [];
+  return Object.values(cache.entries).map((entry) => ({ entry, ts: Date.parse(entry.analyzedAt) })).filter(({ entry, ts }) => {
+    if (Number.isNaN(ts) || ts <= since)
+      return false;
+    const risk = (entry.verdict ?? "").toUpperCase();
+    return risk === "HIGH" || risk === "CRITICAL";
+  }).sort((a, b) => b.ts - a.ts).map(({ entry }) => entry);
+}
+
+// ../core/dist/plugin-scanner.js
+init_types2();
 function defaultPluginsRegistry() {
-  return (0, import_node_path4.join)(getClaudeConfigDir(), "plugins", "installed_plugins.json");
+  return (0, import_node_path5.join)(getClaudeConfigDir(), "plugins", "installed_plugins.json");
 }
 var MAX_FILE_SIZE = 512 * 1024;
 function isPluginInstalledSync(pluginName) {
@@ -14040,6 +14221,7 @@ init_types2();
 init_types2();
 
 // ../core/dist/version-check.js
+init_config();
 init_types2();
 
 // ../core/dist/tool-names.js
@@ -14073,10 +14255,21 @@ var STATUSLINE_MARKER = "sage-statusline.cjs";
 // src/sage-statusline.ts
 var STATUS_PREFIX = "statusline-";
 var STATUS_SUFFIX = ".txt";
+var SKILL_WARNING_WINDOW_MS = 1e4;
+function resolveSkillWarning(startedAt) {
+  const windowStart = new Date(Date.now() - SKILL_WARNING_WINDOW_MS).toISOString();
+  const laterIso = startedAt > windowStart ? startedAt : windowStart;
+  const risky = riskyVerdictsSince(loadSkillVerdictCacheSync(), laterIso).filter(
+    (v) => !foreignSourceRuntime(v.sources, "claude-code")
+  );
+  if (risky.length === 0) return void 0;
+  const names = risky.map((v) => v.skillName?.trim()).filter((n) => n !== void 0 && n !== "");
+  return { count: risky.length, names };
+}
 function getPluginName() {
   try {
-    const pluginRoot = (0, import_node_path5.resolve)(__dirname, "..", "..", "..");
-    const raw = (0, import_node_fs.readFileSync)((0, import_node_path5.join)(pluginRoot, ".claude-plugin", "plugin.json"), "utf-8");
+    const pluginRoot = (0, import_node_path6.resolve)(__dirname, "..", "..", "..");
+    const raw = (0, import_node_fs.readFileSync)((0, import_node_path6.join)(pluginRoot, ".claude-plugin", "plugin.json"), "utf-8");
     const parsed = JSON.parse(raw);
     return parsed.name ?? null;
   } catch {
@@ -14085,7 +14278,7 @@ function getPluginName() {
 }
 function isMarketplaceInstallation() {
   try {
-    const pluginRoot = (0, import_node_fs.realpathSync)((0, import_node_path5.resolve)(__dirname, "..", "..", ".."));
+    const pluginRoot = (0, import_node_fs.realpathSync)((0, import_node_path6.resolve)(__dirname, "..", "..", ".."));
     const claudeDir = (0, import_node_fs.realpathSync)(getClaudeConfigDir());
     return pluginRoot.startsWith(claudeDir);
   } catch {
@@ -14102,7 +14295,7 @@ function isPluginEnabled() {
   const pluginName = getPluginName();
   if (!pluginName) return true;
   try {
-    const settingsPath = (0, import_node_path5.join)(getClaudeConfigDir(), "settings.json");
+    const settingsPath = (0, import_node_path6.join)(getClaudeConfigDir(), "settings.json");
     const raw = (0, import_node_fs.readFileSync)(settingsPath, "utf-8");
     const settings = JSON.parse(raw);
     const enabled = settings.enabledPlugins;
@@ -14117,7 +14310,7 @@ function isPluginEnabled() {
   return true;
 }
 function removeOwnStatusLine() {
-  const settingsPath = (0, import_node_path5.join)(getClaudeConfigDir(), "settings.json");
+  const settingsPath = (0, import_node_path6.join)(getClaudeConfigDir(), "settings.json");
   try {
     const raw = (0, import_node_fs.readFileSync)(settingsPath, "utf-8");
     const settings = JSON.parse(raw);
@@ -14141,7 +14334,7 @@ function pruneStatusFiles() {
     for (const entry of entries) {
       if (!entry.startsWith(STATUS_PREFIX) || !entry.endsWith(STATUS_SUFFIX)) continue;
       try {
-        (0, import_node_fs.unlinkSync)((0, import_node_path5.join)(dir, entry));
+        (0, import_node_fs.unlinkSync)((0, import_node_path6.join)(dir, entry));
       } catch {
       }
     }
@@ -14172,12 +14365,19 @@ function main() {
 `);
     return;
   }
-  const statusFile = (0, import_node_path5.join)(resolvePath("~/.sage"), `statusline-${sanitizeSessionId(sessionId)}.txt`);
+  const statusFile = (0, import_node_path6.join)(resolvePath("~/.sage"), `statusline-${sanitizeSessionId(sessionId)}.txt`);
   try {
     const raw = (0, import_node_fs.readFileSync)(statusFile, "utf-8");
     const data = JSON.parse(raw);
+    let skillWarning;
+    if (config.skill_check.enabled && data.startedAt) {
+      try {
+        skillWarning = resolveSkillWarning(data.startedAt);
+      } catch {
+      }
+    }
     process.stdout.write(
-      `${formatStatusLine(data.denied ?? 0, data.flagged ?? 0, data.lastReason, data.lastCategory, branding)}
+      `${formatStatusLine(data.denied ?? 0, data.flagged ?? 0, data.lastReason, data.lastCategory, branding, skillWarning)}
 `
     );
   } catch {

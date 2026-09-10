@@ -23,10 +23,19 @@ import {
 	safeTruncate,
 	scrubHomePath,
 } from "./content-snapshot.js";
+import {
+	amsiDetectionName,
+	amsiReportingData,
+	formatReportingDetectionName,
+	type PackageDetectionVerdict,
+	PI_DETECTION_NAME,
+	packageDetectionName,
+} from "./detection-names.js";
 import { sendCommunityIqTelemetry } from "./detection-telemetry.js";
 import { DecisionEngine } from "./engine.js";
 import { findAllowException, findDenyException, loadExceptions } from "./exceptions.js";
 import { HeuristicsEngine } from "./heuristics.js";
+import { MODEL_SCHEMA_VERSION } from "./model-storage.js";
 import { PackageChecker } from "./package-checker.js";
 import {
 	extractPackagesFromCommand,
@@ -45,6 +54,7 @@ import type {
 	AuditSignals,
 	CachedVerdict,
 	Config,
+	HeuristicMatch,
 	HookType,
 	Logger,
 	PackageCheckResult,
@@ -120,22 +130,59 @@ export interface ToolEvaluationContext {
 export const AMSI_CONTENT_SNIPPET_MAX = 200;
 /** Hard cap (UTF-16 code units) on `amsi_checks[].content_name`. */
 export const AMSI_CONTENT_NAME_MAX = 256;
+/** Hard cap (UTF-16 code units) on a heuristic PI match excerpt. */
+export const HEURISTIC_PI_CONTENT_SNIPPET_MAX = 200;
 
 /**
- * Build an `amsi_checks` signal entry from a single AMSI scan result.
- *
- * The Win32 AMSI API returns only a numeric threat level, not a named detection,
- * so `detection_name` is synthesized from `amsi_result` using a stable convention
- * (mirroring `package_checks` synthesizing `"PKG|malicious|..."`).
- *
- * Both `content_name` and `content_snippet` are home-scrubbed before truncation so
- * the truncation budget isn't spent on a leaked home prefix. `content_snippet` is
- * omitted when the original `content` is empty so downstream consumers can
- * distinguish "no snippet" from "empty snippet".
- *
- * Exported for unit testing — callers in production should rely on `evaluateToolCall`
- * to populate `auditSignals.amsi_checks`.
+ * Build a heuristic signal entry.
  */
+export function buildHeuristicSignal(
+	match: HeuristicMatch,
+): NonNullable<AuditSignals["heuristics"]>[number] {
+	return {
+		detection_name: formatReportingDetectionName(
+			match.threat.detectionName,
+			"heuristics",
+			`${match.threat.id}:${match.threat.version}`,
+		),
+		rule_id: match.threat.id,
+		rule_version: match.threat.version,
+	};
+}
+
+/**
+ * Select generic PI evidence for `block_event.content_snippet`. ML snippets
+ * retain the model's highest-risk chunk; heuristic matches use the first
+ * matched text with a bounded excerpt.
+ */
+export function resolvePiContentSnippet(
+	piResults: readonly PiCheckResult[],
+	heuristicMatches: readonly HeuristicMatch[],
+): string | undefined {
+	let highestRiskResult: PiCheckResult | undefined;
+	for (const result of piResults) {
+		if (
+			result.risk >= DEFAULT_PI_MEDIUM_RISK_THRESHOLD &&
+			result.contentSnippet &&
+			(!highestRiskResult || result.risk > highestRiskResult.risk)
+		) {
+			highestRiskResult = result;
+		}
+	}
+	if (highestRiskResult?.contentSnippet) return scrubHomePath(highestRiskResult.contentSnippet);
+
+	const heuristicMatch = heuristicMatches.find(
+		(match) => match.threat.category === "prompt_injection",
+	);
+	if (!heuristicMatch) return undefined;
+
+	const snippet = safeTruncate(
+		scrubHomePath(heuristicMatch.matchValue),
+		HEURISTIC_PI_CONTENT_SNIPPET_MAX,
+	);
+	return snippet || undefined;
+}
+
 /**
  * Scrub the file-path portion of an AMSI content_name. The AMSI client emits
  * `contentName` as `"<ToolType>:<path>"` (e.g. `"Write:/home/user/foo.ts"`),
@@ -150,22 +197,33 @@ function scrubAmsiContentName(contentName: string): string {
 	return `${head}${scrubHomePath(tail)}`;
 }
 
+/**
+ * Build an `amsi_checks` signal entry from a single AMSI scan result.
+ *
+ * The Win32 AMSI API returns only a numeric threat level, not a named detection,
+ * so `detection_name` is synthesized from `amsi_result` using a stable canonical name
+ * plus the AMSI result class, lowercase hexadecimal result (without `0x`),
+ * and Sage AMSI engine suffix.
+ *
+ * Both `content_name` and `content_snippet` are home-scrubbed before truncation so
+ * the truncation budget isn't spent on a leaked home prefix. `content_snippet` is
+ * omitted when the original `content` is empty so downstream consumers can
+ * distinguish "no snippet" from "empty snippet".
+ *
+ * Exported for unit testing — callers in production should rely on `evaluateToolCall`
+ * to populate `auditSignals.amsi_checks`.
+ */
 export function buildAmsiSignal(
 	r: AmsiCheckResult,
 ): NonNullable<AuditSignals["amsi_checks"]>[number] {
-	const detectionName =
-		r.amsiResult >= 0x8000
-			? "AMSI|DETECTED"
-			: r.amsiResult >= 0x4000
-				? "AMSI|BLOCKED_BY_ADMIN"
-				: // Defensive: callers should filter these out via `isDetected || isBlockedByAdmin`,
-					// but if a non-detected/non-blocked result still reaches here we emit a
-					// meaningful label rather than silently dropping the entry.
-					"AMSI|UNKNOWN";
 	const contentName = safeTruncate(scrubAmsiContentName(r.contentName), AMSI_CONTENT_NAME_MAX);
 	const snippet = r.content ? safeTruncate(scrubHomePath(r.content), AMSI_CONTENT_SNIPPET_MAX) : "";
 	return {
-		detection_name: detectionName,
+		detection_name: formatReportingDetectionName(
+			amsiDetectionName(r.amsiResult),
+			"amsi",
+			amsiReportingData(r.amsiResult),
+		),
 		content_name: contentName,
 		amsi_result: r.amsiResult,
 		...(snippet ? { content_snippet: snippet } : {}),
@@ -248,7 +306,7 @@ export async function evaluateToolCall(
 				severity: "critical",
 				source: "exception",
 				artifacts: [denyMatch.artifact.value],
-				matchedThreatId: null,
+				matchedThreatId: denyMatch.rule.id,
 				reasons: [
 					`Deny exception: ${denyMatch.rule.match} pattern '${denyMatch.rule.pattern}'${denyMatch.rule.reason ? ` — ${denyMatch.rule.reason}` : ""}`,
 				],
@@ -445,6 +503,12 @@ export async function evaluateToolCall(
 							if (result) {
 								allPiResults.push(result);
 							}
+						} else {
+							logger.info("PI model inference skipped", {
+								context: `WebFetch:${url}`,
+								reason: "content_not_scannable",
+								contentType: fetched.contentType ?? "unknown",
+							});
 						}
 					}
 				}
@@ -497,25 +561,9 @@ export async function evaluateToolCall(
 
 	await cacheUrlResults(urlCheckResults, cache);
 
-	function formatPackageDetectionName(p: PackageCheckResult): string {
-		const base = `PKG|${p.verdict}|registry=${p.registry}|name=${p.packageName}`;
-		if (p.verdict === "suspicious_age") {
-			const ageDays = typeof p.ageDays === "number" ? Math.floor(p.ageDays) : undefined;
-			return ageDays !== undefined ? `${base}|age_days=${ageDays}` : base;
-		}
-		if (p.verdict === "malicious") {
-			const det = (p.fileDetectionNames ?? []).filter((d) => typeof d === "string" && d.length > 0);
-			return det.length > 0 ? `${base}|det=${det.join(",")}` : base;
-		}
-		return base;
-	}
-
 	const auditSignals: AuditSignals = {};
 	if (heuristicMatches.length > 0) {
-		auditSignals.heuristics = heuristicMatches.map((m) => ({
-			rule_id: m.threat.id,
-			rule_version: typeof m.threat.version === "number" ? m.threat.version : undefined,
-		}));
+		auditSignals.heuristics = heuristicMatches.map(buildHeuristicSignal);
 	}
 	if (urlCheckResults.length > 0) {
 		const relevant = urlCheckResults.filter((r) => r.isMalicious);
@@ -544,12 +592,22 @@ export async function evaluateToolCall(
 		}
 	}
 	if (packageCheckResults.length > 0) {
-		const relevant = packageCheckResults.filter((p) => p.verdict !== "clean");
+		const relevant = packageCheckResults.filter(
+			(
+				p,
+			): p is PackageCheckResult & {
+				verdict: PackageDetectionVerdict;
+			} => p.verdict !== "clean",
+		);
 		if (relevant.length > 0) {
 			auditSignals.package_checks = relevant.map((p) => ({
-				detection_name: formatPackageDetectionName(p),
+				detection_name: formatReportingDetectionName(
+					packageDetectionName(p.verdict),
+					"package",
+					p.packageVersion ? `${p.packageName}:${p.packageVersion}` : p.packageName,
+				),
 				package_name: p.packageName,
-				package_version: undefined,
+				package_version: p.packageVersion,
 				package_registry: p.registry,
 			}));
 		}
@@ -568,6 +626,11 @@ export async function evaluateToolCall(
 	if (allPiResults.length > 0) {
 		const piSnippetFloor = DEFAULT_PI_MEDIUM_RISK_THRESHOLD;
 		auditSignals.pi_checks = allPiResults.map((r) => ({
+			detection_name: formatReportingDetectionName(
+				PI_DETECTION_NAME,
+				"ml",
+				`${r.modelId}:${MODEL_SCHEMA_VERSION}`,
+			),
 			risk: r.risk,
 			model_id: r.modelId,
 			content_name: r.contentName,
@@ -586,6 +649,7 @@ export async function evaluateToolCall(
 	}
 
 	const resolvedSignals = Object.keys(auditSignals).length > 0 ? auditSignals : undefined;
+	const contentSnippet = resolvePiContentSnippet(allPiResults, heuristicMatches);
 
 	// Build the structured content snapshot once. Both the audit log and the
 	// detection telemetry payload consume this same object — the FP tool reads
@@ -612,6 +676,7 @@ export async function evaluateToolCall(
 			hookType: request.hookType,
 			signals: resolvedSignals,
 			content: resolvedContent,
+			contentSnippet,
 			eventId,
 			toolUseId: request.toolUseId,
 		});
@@ -631,6 +696,7 @@ export async function evaluateToolCall(
 				hookType: request.hookType,
 				toolName: request.toolName,
 				content: resolvedContent,
+				contentSnippet,
 				signals: resolvedSignals,
 				communityIqEnabled: config.community_iq,
 				config,
@@ -802,6 +868,7 @@ async function checkPackages(
 			}
 			results.push({
 				packageName: pkg.name,
+				packageVersion: pkg.version,
 				registry: pkg.registry,
 				verdict: rawVerdict as "malicious" | "not_found" | "suspicious_age" | "unknown",
 				confidence: rawConf,
@@ -959,8 +1026,7 @@ export async function evaluateToolOutput(
 	const config = await resolveEvaluationConfig(context, logger);
 
 	// Tier 1: heuristic rules — only prompt_injection category for PostToolUse output scanning
-	let heuristicMatchId: string | undefined;
-	let heuristicMatchVersion: number | undefined;
+	let heuristicMatch: HeuristicMatch | undefined;
 	try {
 		if (config.heuristics_enabled) {
 			let threats = await loadThreats(context.threatsDir);
@@ -982,9 +1048,7 @@ export async function evaluateToolOutput(
 			const matches = engine.match(artifacts);
 			const top = matches[0];
 			if (top) {
-				heuristicMatchId = top.threat.id;
-				heuristicMatchVersion =
-					typeof top.threat.version === "number" ? top.threat.version : undefined;
+				heuristicMatch = top;
 				warnings.push({
 					source: "heuristic",
 					message: formatOutputWarning(request.toolName, `${top.threat.title} (${top.threat.id})`),
@@ -999,12 +1063,11 @@ export async function evaluateToolOutput(
 	// Log and send telemetry for PostToolUse detections
 	if (warnings.length > 0) {
 		const auditSignals: AuditSignals = {};
-		if (heuristicMatchId) {
-			auditSignals.heuristics = [
-				{ rule_id: heuristicMatchId, rule_version: heuristicMatchVersion },
-			];
+		if (heuristicMatch) {
+			auditSignals.heuristics = [buildHeuristicSignal(heuristicMatch)];
 		}
 		const resolvedSignals = Object.keys(auditSignals).length > 0 ? auditSignals : undefined;
+		const contentSnippet = resolvePiContentSnippet([], heuristicMatch ? [heuristicMatch] : []);
 
 		const builtContent = buildContentSnapshot(request.toolName, request.toolInput);
 		const resolvedContent = Object.keys(builtContent).length > 0 ? builtContent : undefined;
@@ -1017,7 +1080,7 @@ export async function evaluateToolOutput(
 				severity: "critical",
 				source: "heuristic",
 				artifacts: [],
-				matchedThreatId: heuristicMatchId ?? "PROMPT_INJECTION",
+				matchedThreatId: heuristicMatch?.threat.id ?? "PROMPT_INJECTION",
 				reasons: ["Prompt injection detected in tool output"],
 			};
 			await logVerdict(config.logging, {
@@ -1030,6 +1093,7 @@ export async function evaluateToolOutput(
 				hookType: request.hookType ?? "PostToolUse",
 				signals: resolvedSignals,
 				content: resolvedContent,
+				contentSnippet,
 				eventId,
 				toolUseId: request.toolUseId,
 			});
@@ -1046,6 +1110,7 @@ export async function evaluateToolOutput(
 				hookType: request.hookType ?? "PostToolUse",
 				toolName: request.toolName,
 				content: resolvedContent,
+				contentSnippet,
 				signals: resolvedSignals,
 				communityIqEnabled: config.community_iq,
 				config,

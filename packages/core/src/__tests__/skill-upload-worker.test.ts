@@ -116,6 +116,39 @@ describe("runSkillUploadWorker", () => {
 		expect(entry?.verdict).toBeUndefined();
 	});
 
+	it("never uploads a skill with no readable entries; caches a sentinel instead", async () => {
+		// Emptied between the scan that queued it and this worker run. Zipping it
+		// would produce a 22-byte member-less archive the analyzer rejects with a
+		// 400, which fails open to no_verdict and re-uploads it every session.
+		await rm(join(skillFolder, "SKILL.md"));
+		const client: SkillAnalyzer = { analyzeZip: vi.fn() };
+
+		const result = await runSkillUploadWorker({ pendingPath, verdictCachePath, client });
+
+		expect(result).toEqual({ analyzed: 0, retained: 0 });
+		expect(client.analyzeZip).not.toHaveBeenCalled();
+		// Terminal, not retried: dropped from pending and given a sentinel verdict.
+		const marker = await loadPendingMarker(pendingPath);
+		expect(isPending(marker, ID)).toBe(false);
+		const entry = getVerdict(await loadSkillVerdictCache(verdictCachePath), ID);
+		expect(entry).not.toBeNull();
+		expect(entry?.verdict).toBeUndefined();
+	});
+
+	it("keeps a deleted skill folder pending (retryable), unlike an empty one", async () => {
+		// Contrast with the empty case: an unreadable folder is a transient error,
+		// so it must stay pending rather than being cached as terminal.
+		await rm(skillFolder, { recursive: true, force: true });
+		const client: SkillAnalyzer = { analyzeZip: vi.fn() };
+
+		const result = await runSkillUploadWorker({ pendingPath, verdictCachePath, client });
+
+		expect(result).toEqual({ analyzed: 0, retained: 1 });
+		expect(client.analyzeZip).not.toHaveBeenCalled();
+		const marker = await loadPendingMarker(pendingPath);
+		expect(isPending(marker, ID)).toBe(true);
+	});
+
 	it("processes 4 skills across two batches, all analyzed and cleared", async () => {
 		const ids = [ID, "b".repeat(64), "c".repeat(64), "d".repeat(64)];
 		const folders = [skillFolder];

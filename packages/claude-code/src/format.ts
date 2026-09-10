@@ -9,6 +9,8 @@ import {
 	defaultBranding,
 	kv,
 	PAD,
+	remediationHint,
+	ruleLabel,
 	SEPARATOR_WIDTH,
 	separatorLine,
 	severityEmoji,
@@ -23,6 +25,8 @@ export function artifactTypeLabel(type: string): string {
 
 /** Append category and artifact details to lines array. */
 function appendVerdictDetails(lines: string[], verdict: Verdict): void {
+	const rule = ruleLabel(verdict);
+	if (rule) lines.push(kv("Rule", rule));
 	lines.push(kv("Severity", verdict.severity.toUpperCase()));
 	if (verdict.artifacts.length > 0) {
 		// biome-ignore lint/style/noNonNullAssertion: length check above guarantees index 0 exists
@@ -57,9 +61,7 @@ export function formatBlockReason(verdict: Verdict, branding: Branding = default
 			lines.push("Do NOT attempt to fetch this URL again or access it through alternative tools.");
 		}
 		lines.push("");
-		lines.push(
-			"If this is a false positive, use the sage_report_false_positive MCP tool to report it.",
-		);
+		lines.push(remediationHint(verdict));
 		return lines.join("\n");
 	}
 

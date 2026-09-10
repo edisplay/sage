@@ -4190,7 +4190,8 @@ var ArtifactSchema = external_exports.object({
 var VerdictSeveritySchema = external_exports.enum(["info", "warning", "critical"]);
 var ThreatSchema = external_exports.object({
   id: external_exports.string(),
-  version: external_exports.number().int().optional(),
+  version: external_exports.number().int().positive(),
+  detectionName: external_exports.string(),
   category: external_exports.string(),
   severity: VerdictSeveritySchema,
   confidence: external_exports.number(),
@@ -4289,6 +4290,7 @@ var ConfigSchema = external_exports.object({
   sensitivity: SensitivitySchema.default("balanced"),
   disabled_threats: external_exports.array(external_exports.string()).default([]),
   announce_clean_scans: external_exports.boolean().default(true),
+  manage_status_line: external_exports.boolean().default(true),
   brand_key: external_exports.string().min(1).max(32).regex(/^[a-z0-9_-]+$/u).optional(),
   community_iq: external_exports.boolean().default(true)
 });
@@ -4535,7 +4537,7 @@ var import_node_path4 = require("node:path");
 var import_node_url = require("node:url");
 var import_meta = {};
 function resolveVersion() {
-  if (true) return "0.12.0";
+  if (true) return "0.13.0";
   try {
     const pkgPath = (0, import_node_path4.join)((0, import_node_path4.dirname)((0, import_node_url.fileURLToPath)(import_meta.url)), "..", "package.json");
     const pkg = JSON.parse(getFileContentSync(pkgPath));
@@ -5471,6 +5473,10 @@ function chunk(arr, size) {
 async function zipAndUpload(folder, skillId, client, logger) {
   try {
     const entries = await entriesFromDirectory(folder, MAX_ZIP_BYTES);
+    if (entries.length === 0) {
+      logger.warn("Skill has no readable entries; skipping upload", { skillId, folder });
+      return { tag: "empty" };
+    }
     const zip = zipEntriesWithLimit(entries, MAX_ZIP_BYTES);
     const result = await client.analyzeZip(zip, { skillId, slug: (0, import_node_path8.basename)(folder) });
     if (!result || !result.verdict) return { tag: "no_verdict" };
@@ -5500,7 +5506,7 @@ async function runSkillUploadWorker(args = {}) {
       }))
     );
     const successes = [];
-    const oversized = [];
+    const terminal = [];
     for (const {
       skill,
       skill: { skillId },
@@ -5525,15 +5531,15 @@ async function runSkillUploadWorker(args = {}) {
         }
       } else if (outcome.tag === "ok") {
         successes.push({ skill, result: outcome.result });
-      } else if (outcome.tag === "too_large") {
-        oversized.push(skillId);
+      } else if (outcome.tag === "too_large" || outcome.tag === "empty") {
+        terminal.push(skillId);
         if (loggingConfig) {
-          logSkillVerdict(loggingConfig, skillId, "too_large").catch(() => {
+          logSkillVerdict(loggingConfig, skillId, outcome.tag).catch(() => {
           });
         }
       }
     }
-    if (successes.length === 0 && oversized.length === 0) continue;
+    if (successes.length === 0 && terminal.length === 0) continue;
     const cache = await loadSkillVerdictCache(args.verdictCachePath, args.verdictTtlMs, logger);
     for (const { skill, result } of successes) {
       putVerdict(cache, skill.skillId, {
@@ -5548,7 +5554,7 @@ async function runSkillUploadWorker(args = {}) {
         ]
       });
     }
-    for (const skillId of oversized) {
+    for (const skillId of terminal) {
       putVerdict(cache, skillId, {});
     }
     await saveSkillVerdictCache(cache, args.verdictCachePath, logger);
@@ -5556,7 +5562,7 @@ async function runSkillUploadWorker(args = {}) {
     for (const { skill } of successes) {
       removePending(fresh, skill.skillId);
     }
-    for (const skillId of oversized) {
+    for (const skillId of terminal) {
       removePending(fresh, skillId);
     }
     await savePendingMarker(fresh, args.pendingPath, logger);

@@ -1,5 +1,27 @@
 # @gendigital/sage-core
 
+## 0.13.0
+
+### Minor Changes
+
+- Add a `manage_status_line` setting for disabling Claude Code status-line management and its related startup hint.
+
+- Add stable canonical names to Sage-owned detection signals and require explicit positive versions for heuristic rules.
+
+- Show triggering rule IDs in detection notifications, false-positive guidance, and runtime audit entries, with tailored guidance for user-defined exception rules.
+
+### Patch Changes
+
+- Reduce false positives in five command and WMI heuristic rules by tightening command and token boundaries.
+
+- Fix command and RC-file matching false positives, and add reusable regex macros for threat rules.
+
+- Apply command-position matching across the threat corpus while preserving Windows `.exe` detection, improving quoted-text handling, and adding corpus-wide regression tests.
+
+- Standardize shell detection with the shared `{{SHELLS}}` macro, including `ash`, `busybox`, `powershell`, and `pwsh`.
+
+- Skip skills with no readable contents instead of repeatedly submitting them for analysis.
+
 ## 0.12.0
 
 ### Minor Changes

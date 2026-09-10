@@ -390,6 +390,7 @@ Sage also writes the current default configuration to `~/.sage/config.defaults.j
   "sensitivity": "balanced",
   "disabled_threats": [],
   "announce_clean_scans": true,
+  "manage_status_line": true,
   "community_iq": true
 }
 ```
@@ -546,6 +547,24 @@ Why you might want this:
 - Operators that already trust their plugin set don't need a per-session reminder; setting `announce_clean_scans: false` keeps Sage silent on the happy path while still allowing real threat banners through.
 
 The flag is honoured by every connector (`@gendigital/sage-openclaw`, `@gendigital/sage-claude-code`, `@gendigital/sage-opencode`, `@gendigital/sage-cursor`, `@gendigital/sage-vscode`).
+
+#### `manage_status_line`
+
+Boolean, default `true`, Claude Code only. When `true`, Sage installs its status line into `~/.claude/settings.json` for users who have none, keeps its own entry up to date, and — if you already run a different status line — prints a one-time-per-session hint on how to add Sage to it.
+
+Set it to `false` when you have already wired Sage into your own status line and don't want the hint:
+
+```json
+{
+  "manage_status_line": false
+}
+```
+
+Sage detects an existing integration by looking for `sage-statusline.cjs` in the `statusLine.command` string or in a script file that command points to. It cannot see through a `PATH` command (`"command": "ccstatusline"`) or into a third-party tool's own config (`~/.config/ccstatusline/settings.json`), so those setups get the hint every session even though the integration works. This flag is the way to turn it off.
+
+With `manage_status_line: false`, Sage never writes to `settings.json` — users starting from no status line have to add `node "<plugin-root>/packages/claude-code/dist/sage-statusline.cjs"` themselves.
+
+This flag is independent of [`announce_clean_scans`](#announce_clean_scans): turning off status-line management keeps the clean-scan banner, and vice versa. Set both to `false` for no non-essential startup output at all. Neither flag hides threat banners, malformed-config warnings, allowlist-migration prompts or one-time consent notices.
 
 ### Files on Disk
 

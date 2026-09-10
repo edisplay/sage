@@ -4,10 +4,13 @@
 
 # osascript 'do shell script' wrapping (shell via AppleScript)
 - id: "CLT-MAC-OBFUS-001"
+  version: 1
+  detection_name: "CMD:SageMacOSObfuscation-A [Heur]"
   category: tool
   severity: critical
   confidence: 0.90
-  pattern: "\\bosascript\\b.*do shell script"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-CMD-009.
+  pattern: "{{CMD_POS}}osascript{{NOT_FILENAME}}.*do shell script"
   case_insensitive: true
   match_on: command
   title: "Shell command obfuscated via AppleScript do shell script"
@@ -16,10 +19,13 @@
 
 # JXA (JavaScript for Automation) execution
 - id: "CLT-MAC-OBFUS-002"
+  version: 1
+  detection_name: "CMD:SageMacOSObfuscation-B [Heur]"
   category: tool
   severity: critical
   confidence: 0.90
-  pattern: "\\bosascript\\b.*-l\\s+JavaScript.*-e"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-CMD-009.
+  pattern: "{{CMD_POS}}osascript{{NOT_FILENAME}}.*-l\\s+JavaScript.*-e"
   case_insensitive: true
   match_on: command
   title: "JXA inline execution (JavaScript for Automation obfuscation)"
@@ -28,10 +34,15 @@
 
 # Base64 decode piped to osascript
 - id: "CLT-MAC-OBFUS-003"
+  version: 1
+  detection_name: "CMD:SageMacOSObfuscation-C [Heur]"
   category: tool
   severity: critical
   confidence: 0.95
-  pattern: "base64\\s+(-d|-D|--decode).*\\|.*osascript"
+  # {{CMD_POS}} + {{NOT_FILENAME}} on `base64`, same shape as CLT-CMD-009.
+  # Had no boundary at all. Trailing {{NOT_FILENAME}} on `osascript` too --
+  # without it, a longer identifier like "osascriptable-tool" still matches.
+  pattern: "{{CMD_POS}}base64{{NOT_FILENAME}}\\s+(-d|-D|--decode).*\\|.*osascript{{NOT_FILENAME}}"
   match_on: command
   title: "Base64 decode piped to osascript (encoded payload execution)"
   expires_at: null
@@ -39,6 +50,8 @@
 
 # DYLD_INSERT_LIBRARIES injection
 - id: "CLT-MAC-OBFUS-004"
+  version: 1
+  detection_name: "CMD:SageMacOSObfuscation-D [Heur]"
   category: tool
   severity: critical
   confidence: 0.90
@@ -50,10 +63,13 @@
 
 # Quarantine attribute removal (evasion)
 - id: "CLT-MAC-OBFUS-005"
+  version: 1
+  detection_name: "CMD:SageMacOSObfuscation-E [Heur]"
   category: tool
   severity: warning
   confidence: 0.60
-  pattern: "\\bxattr\\b.*(-d|-c).*com\\.apple\\.quarantine"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-CMD-009.
+  pattern: "{{CMD_POS}}xattr{{NOT_FILENAME}}.*(-d|-c).*com\\.apple\\.quarantine"
   match_on: command
   title: "Quarantine attribute removal (Gatekeeper evasion)"
   expires_at: null
@@ -63,10 +79,13 @@
 
 # plutil plist manipulation (payload hiding)
 - id: "CLT-MAC-OBFUS-006"
+  version: 1
+  detection_name: "CMD:SageMacOSObfuscation-F [Heur]"
   category: tool
   severity: warning
   confidence: 0.60
-  pattern: "\\bplutil\\b.*-convert\\s+(binary1|raw)"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-CMD-009.
+  pattern: "{{CMD_POS}}plutil{{NOT_FILENAME}}.*-convert\\s+(binary1|raw)"
   match_on: command
   title: "Plist conversion to binary (payload obfuscation)"
   expires_at: null
@@ -74,10 +93,13 @@
 
 # Swift/swiftc inline execution
 - id: "CLT-MAC-OBFUS-007"
+  version: 1
+  detection_name: "CMD:SageMacOSObfuscation-G [Heur]"
   category: tool
   severity: warning
   confidence: 0.60
-  pattern: "\\bswift\\b\\s+-e\\s+[\"'].*\\b(Process|NSTask|URLSession|shell)\\b"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-CMD-009.
+  pattern: "{{CMD_POS}}swift{{NOT_FILENAME}}\\s+-e\\s+[\"'].*\\b(Process|NSTask|URLSession|shell)\\b"
   case_insensitive: true
   match_on: command
   title: "Swift inline execution with system calls"

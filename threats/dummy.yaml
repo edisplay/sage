@@ -26,6 +26,8 @@
 # ─── Command patterns (Bash tool) ───────────────────────────────────
 
 - id: "DUMMY-CMD-DENY-001"
+  version: 1
+  detection_name: "CMD:SageTestCommandDeny-A [Tst]"
   category: testing
   severity: critical
   confidence: 0.95
@@ -36,6 +38,8 @@
   revoked: false
 
 - id: "DUMMY-CMD-DENY-002"
+  version: 1
+  detection_name: "CMD:SageTestCommandDeny-B [Tst]"
   category: testing
   severity: critical
   confidence: 0.95
@@ -46,6 +50,8 @@
   revoked: false
 
 - id: "DUMMY-CMD-ASK-001"
+  version: 1
+  detection_name: "CMD:SageTestCommandAsk-A [Tst]"
   category: testing
   severity: warning
   confidence: 0.60
@@ -56,6 +62,8 @@
   revoked: false
 
 - id: "DUMMY-CMD-ASK-002"
+  version: 1
+  detection_name: "CMD:SageTestCommandAsk-B [Tst]"
   category: testing
   severity: warning
   confidence: 0.60
@@ -66,6 +74,8 @@
   revoked: false
 
 - id: "DUMMY-CMD-LOG-001"
+  version: 1
+  detection_name: "CMD:SageTestCommandLog-A [Tst]"
   category: testing
   severity: info
   confidence: 0.10
@@ -79,6 +89,8 @@
 # ─── File-path patterns (Write / Edit / Read / Delete tools) ────────
 
 - id: "DUMMY-FILE-DENY-001"
+  version: 1
+  detection_name: "FN:SageTestFileDeny-A [Tst]"
   category: testing
   severity: critical
   confidence: 0.95
@@ -89,6 +101,8 @@
   revoked: false
 
 - id: "DUMMY-FILE-ASK-001"
+  version: 1
+  detection_name: "FN:SageTestFileAsk-A [Tst]"
   category: testing
   severity: warning
   confidence: 0.60
@@ -99,6 +113,8 @@
   revoked: false
 
 - id: "DUMMY-FILE-LOG-001"
+  version: 1
+  detection_name: "FN:SageTestFileLog-A [Tst]"
   category: testing
   severity: info
   confidence: 0.10
@@ -112,6 +128,8 @@
 # ─── Content patterns (Write / Edit tools — file body) ──────────────
 
 - id: "DUMMY-CONTENT-DENY-001"
+  version: 1
+  detection_name: "Other:SageTestContentDeny-A [Tst]"
   category: testing
   severity: critical
   confidence: 0.95
@@ -122,6 +140,8 @@
   revoked: false
 
 - id: "DUMMY-CONTENT-ASK-001"
+  version: 1
+  detection_name: "Other:SageTestContentAsk-A [Tst]"
   category: testing
   severity: warning
   confidence: 0.60
@@ -132,6 +152,8 @@
   revoked: false
 
 - id: "DUMMY-CONTENT-LOG-001"
+  version: 1
+  detection_name: "Other:SageTestContentLog-A [Tst]"
   category: testing
   severity: info
   confidence: 0.10
@@ -146,6 +168,8 @@
 # Uses .test TLD (RFC 2606 reserved, never resolves) for safety.
 
 - id: "DUMMY-URL-DENY-001"
+  version: 1
+  detection_name: "FN:SageTestUrlDeny-A [Tst]"
   category: testing
   severity: critical
   confidence: 0.95
@@ -156,6 +180,8 @@
   revoked: false
 
 - id: "DUMMY-URL-ASK-001"
+  version: 1
+  detection_name: "FN:SageTestUrlAsk-A [Tst]"
   category: testing
   severity: warning
   confidence: 0.60
@@ -166,6 +192,8 @@
   revoked: false
 
 - id: "DUMMY-URL-LOG-001"
+  version: 1
+  detection_name: "FN:SageTestUrlLog-A [Tst]"
   category: testing
   severity: info
   confidence: 0.10
@@ -179,6 +207,8 @@
 # ─── Domain pattern (verifies domain→url routing in heuristics) ─────
 
 - id: "DUMMY-DOMAIN-DENY-001"
+  version: 1
+  detection_name: "FN:SageTestDomainDeny-A [Tst]"
   category: testing
   severity: critical
   confidence: 0.95

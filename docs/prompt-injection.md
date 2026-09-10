@@ -162,7 +162,7 @@ Detection telemetry is sent to the Sage backend (Community IQ) for aggregate thr
 1. User tells the agent a detection was wrong
 2. Agent calls `sage_list_audit_entries` to find the entry
 3. Agent calls `sage_report_false_positive` with the entry ID and reasoning
-4. Report is sent to Sage Proxy with ML signal metadata (risk score, model ID)
+4. Report is sent to Sage Proxy with PI signal metadata and the generic `block_event.content_snippet`: ML hits retain their per-model metadata and use the highest-risk model chunk; heuristic hits include matching rule IDs and use the first matched text, capped at 200 characters
 
 This works for both PreToolUse (deny verdicts) and PostToolUse (warning verdicts) since both produce audit log entries.
 

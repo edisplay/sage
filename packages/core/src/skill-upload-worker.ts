@@ -73,6 +73,7 @@ type UploadOutcome =
 	| { tag: "ok"; result: SkillAnalyzeResult }
 	| { tag: "no_verdict" }
 	| { tag: "too_large" }
+	| { tag: "empty" }
 	| { tag: "error"; error: unknown };
 
 async function zipAndUpload(
@@ -89,6 +90,17 @@ async function zipAndUpload(
 		// outcome as zipEntriesWithLimit, just earlier. maxBytes only bounds the
 		// byte counter — path/symlink containment is unchanged.
 		const entries = await entriesFromDirectory(folder, MAX_ZIP_BYTES);
+		// Nothing to submit. Terminal instead, like `too_large`.
+		//
+		// Reachable two ways: every file was filtered out by the symlink-escape
+		// check in `entriesFromDirectory` (the folder's content resolves outside
+		// the skill root), or the folder was emptied between the session-start scan
+		// that queued it and this detached worker. A folder that is empty at scan
+		// time never gets here — discovery requires a `SKILL.md`.
+		if (entries.length === 0) {
+			logger.warn("Skill has no readable entries; skipping upload", { skillId, folder });
+			return { tag: "empty" };
+		}
 		const zip = zipEntriesWithLimit(entries, MAX_ZIP_BYTES);
 		const result = await client.analyzeZip(zip, { skillId, slug: basename(folder) });
 		if (!result || !result.verdict) return { tag: "no_verdict" };
@@ -133,7 +145,8 @@ export async function runSkillUploadWorker(
 		);
 
 		const successes: Array<{ skill: PendingSkill; result: SkillAnalyzeResult }> = [];
-		const oversized: string[] = [];
+		/** Skills that can never be uploaded; cached as a sentinel instead of retried. */
+		const terminal: string[] = [];
 
 		for (const {
 			skill,
@@ -157,18 +170,19 @@ export async function runSkillUploadWorker(
 				}
 			} else if (outcome.tag === "ok") {
 				successes.push({ skill, result: outcome.result });
-			} else if (outcome.tag === "too_large") {
+			} else if (outcome.tag === "too_large" || outcome.tag === "empty") {
 				// Terminal: this skill can never be uploaded. Cache a sentinel verdict
 				// (no verdict string = allow-equivalent, consistent with fail-open) and
-				// remove from pending so the scanner stops deferring cache for it.
-				oversized.push(skillId);
+				// remove from pending so the scanner stops deferring cache for it and no
+				// later session re-submits it.
+				terminal.push(skillId);
 				if (loggingConfig) {
-					logSkillVerdict(loggingConfig, skillId, "too_large").catch(() => {});
+					logSkillVerdict(loggingConfig, skillId, outcome.tag).catch(() => {});
 				}
 			}
 		}
 
-		if (successes.length === 0 && oversized.length === 0) continue;
+		if (successes.length === 0 && terminal.length === 0) continue;
 
 		// Batch write: one load-modify-save for all resolved skills in this batch.
 		const cache = await loadSkillVerdictCache(args.verdictCachePath, args.verdictTtlMs, logger);
@@ -185,7 +199,7 @@ export async function runSkillUploadWorker(
 				],
 			});
 		}
-		for (const skillId of oversized) {
+		for (const skillId of terminal) {
 			putVerdict(cache, skillId, {});
 		}
 		await saveSkillVerdictCache(cache, args.verdictCachePath, logger);
@@ -195,7 +209,7 @@ export async function runSkillUploadWorker(
 		for (const { skill } of successes) {
 			removePending(fresh, skill.skillId);
 		}
-		for (const skillId of oversized) {
+		for (const skillId of terminal) {
 			removePending(fresh, skillId);
 		}
 		await savePendingMarker(fresh, args.pendingPath, logger);

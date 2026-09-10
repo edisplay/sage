@@ -6,7 +6,7 @@
 
 import { defaultBranding } from "./brands.js";
 import type { SessionStartResult } from "./session-start.js";
-import type { Branding, PluginScanResult } from "./types.js";
+import type { Branding, PluginScanResult, Verdict } from "./types.js";
 import type { VersionCheckResult } from "./version-check.js";
 
 export const PAD = 12;
@@ -25,6 +25,24 @@ export function kv(key: string, value: string): string {
 
 export function separatorLine(headerLength: number): string {
 	return "━".repeat(headerLength);
+}
+
+/** Rule id to show the user, or null when no rule backs the signal (URL check, AMSI, package check). */
+export function ruleLabel(verdict: Verdict): string | null {
+	if (!verdict.matchedThreatId) return null;
+	return verdict.source === "exception"
+		? `${verdict.matchedThreatId} (your exception rule)`
+		: verdict.matchedThreatId;
+}
+
+/** Closing line: user's own rules point at the exceptions file, everything else at FP reporting. */
+export function remediationHint(verdict: Verdict): string {
+	if (verdict.source === "exception") {
+		const id = verdict.matchedThreatId ? ` (id ${verdict.matchedThreatId})` : "";
+		return `This block comes from your own rule in ~/.sage/exceptions.json${id} — edit or remove it there.`;
+	}
+	const rule = verdict.matchedThreatId ? ` (rule ${verdict.matchedThreatId})` : "";
+	return `If this is a false positive, use the sage_report_false_positive MCP tool to report it${rule}.`;
 }
 
 export function formatUpdateNotice(result: VersionCheckResult): string {

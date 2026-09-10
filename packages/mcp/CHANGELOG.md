@@ -1,5 +1,14 @@
 # @gendigital/sage-mcp
 
+## 0.13.0
+
+### Patch Changes
+
+- Add stable canonical names to Sage-owned detection signals and require explicit positive versions for heuristic rules.
+
+- Updated dependencies:
+  - Updated dependency `@gendigital/sage-core` to `0.13.0`
+
 ## 0.12.0
 
 ### Patch Changes

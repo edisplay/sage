@@ -9,6 +9,7 @@ import {
 	formatDenyMessage,
 	guardToolCall,
 	type Logger,
+	ruleLabel,
 	summarizeArtifacts,
 } from "@gendigital/sage-core";
 
@@ -149,10 +150,12 @@ export function createToolHandlers(
 			}
 
 			try {
+				const rule = ruleLabel(verdict);
+				const ruleSuffix = rule ? ` [rule ${rule}]` : "";
 				const toastMsg =
 					verdict.decision === "deny"
-						? `${branding.name} blocked: ${verdict.reasons[0] ?? "Threat detected"} (${verdict.category})`
-						: `${branding.name} flagged: ${verdict.reasons[0] ?? "Action flagged"} (${verdict.category})`;
+						? `${branding.name} blocked: ${verdict.reasons[0] ?? "Threat detected"} (${verdict.category})${ruleSuffix}`
+						: `${branding.name} flagged: ${verdict.reasons[0] ?? "Action flagged"} (${verdict.category})${ruleSuffix}`;
 				options?.showToast?.(toastMsg, verdict.severity === "critical" ? "error" : "warning");
 			} catch {
 				// Toast failure is non-critical — never prevent enforcement

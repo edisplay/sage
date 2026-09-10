@@ -4,10 +4,14 @@
 
 # Install-Module without -RequiredVersion
 - id: "CLT-WIN-SUPPLY-001"
+  version: 1
+  detection_name: "CMD:SageWindowsSupplyChain-A [Heur]"
   category: supply_chain
   severity: warning
   confidence: 0.60
-  pattern: "[Ii]nstall-[Mm]odule\\s+(?!.*-[Rr]equired[Vv]ersion)"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-WIN-CMD-036. The bare
+  # cmdlet mention fired on prose merely describing the risk.
+  pattern: "{{CMD_POS}}[Ii]nstall-[Mm]odule{{NOT_FILENAME}}\\s+(?!.*-[Rr]equired[Vv]ersion)"
   match_on: command
   title: "PowerShell Install-Module without -RequiredVersion"
   expires_at: null

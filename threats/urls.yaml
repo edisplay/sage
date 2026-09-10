@@ -5,6 +5,8 @@
 
 # --- Known malware hosting patterns ---
 - id: "CLT-URL-001"
+  version: 1
+  detection_name: "FN:SageUrl-A [Heur]"
   category: network_egress
   severity: critical
   confidence: 0.85
@@ -16,6 +18,8 @@
 
 # --- Paste sites used for C2 ---
 - id: "CLT-URL-002"
+  version: 1
+  detection_name: "FN:SageUrl-B [Heur]"
   category: network_egress
   severity: warning
   confidence: 0.60
@@ -26,6 +30,8 @@
   revoked: false
 
 - id: "CLT-URL-003"
+  version: 1
+  detection_name: "FN:SageUrl-C [Heur]"
   category: network_egress
   severity: warning
   confidence: 0.60
@@ -40,6 +46,8 @@
 # (10/8, 172.16/12, 192.168/16), and link-local (169.254/16) ranges,
 # which are common in local development and rarely indicate C2 traffic.
 - id: "CLT-URL-004"
+  version: 1
+  detection_name: "FN:SageUrl-D [Heur]"
   category: network_egress
   severity: warning
   confidence: 0.60
@@ -51,6 +59,8 @@
 
 # --- Executable downloads ---
 - id: "CLT-URL-005"
+  version: 1
+  detection_name: "FN:SageUrl-E [Heur]"
   category: network_egress
   severity: warning
   confidence: 0.60

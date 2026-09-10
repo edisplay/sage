@@ -5,6 +5,8 @@
 
 # SAM/SECURITY/SYSTEM hive
 - id: "CLT-WIN-FILE-001"
+  version: 1
+  detection_name: "FN:SageWindowsFile-A [Heur]"
   category: secrets
   severity: critical
   confidence: 0.95
@@ -16,6 +18,8 @@
 
 # NTDS.dit (Active Directory database)
 - id: "CLT-WIN-FILE-002"
+  version: 1
+  detection_name: "FN:SageWindowsFile-B [Heur]"
   category: secrets
   severity: critical
   confidence: 0.95
@@ -27,6 +31,8 @@
 
 # Windows hosts file
 - id: "CLT-WIN-FILE-003"
+  version: 1
+  detection_name: "FN:SageWindowsFile-C [Heur]"
   category: tool
   severity: warning
   confidence: 0.60
@@ -38,6 +44,8 @@
 
 # Startup folder
 - id: "CLT-WIN-FILE-004"
+  version: 1
+  detection_name: "FN:SageWindowsFile-D [Heur]"
   category: tool
   severity: warning
   confidence: 0.60
@@ -49,6 +57,8 @@
 
 # Executable script in System32/SysWOW64
 - id: "CLT-WIN-FILE-005"
+  version: 1
+  detection_name: "FN:SageWindowsFile-E [Heur]"
   category: tool
   severity: critical
   confidence: 0.90
@@ -60,6 +70,8 @@
 
 # Driver file in System32/drivers
 - id: "CLT-WIN-FILE-006"
+  version: 1
+  detection_name: "FN:SageWindowsFile-F [Heur]"
   category: tool
   severity: critical
   confidence: 0.90
@@ -71,6 +83,8 @@
 
 # Task Scheduler directory
 - id: "CLT-WIN-FILE-007"
+  version: 1
+  detection_name: "FN:SageWindowsFile-G [Heur]"
   category: tool
   severity: warning
   confidence: 0.60
@@ -82,6 +96,8 @@
 
 # SSH key or config file (Windows path)
 - id: "CLT-WIN-FILE-008"
+  version: 1
+  detection_name: "FN:SageWindowsFile-H [Heur]"
   category: secrets
   severity: warning
   confidence: 0.60
@@ -93,6 +109,8 @@
 
 # AWS credentials file (Windows path)
 - id: "CLT-WIN-FILE-009"
+  version: 1
+  detection_name: "FN:SageWindowsFile-I [Heur]"
   category: secrets
   severity: warning
   confidence: 0.60
@@ -104,6 +122,8 @@
 
 # Browser credential stores
 - id: "CLT-WIN-FILE-010"
+  version: 1
+  detection_name: "FN:SageWindowsFile-J [Heur]"
   category: secrets
   severity: critical
   confidence: 0.90

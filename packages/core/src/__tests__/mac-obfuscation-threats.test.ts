@@ -102,8 +102,46 @@ describe("macOS obfuscation threats", () => {
 		expect(ids.filter((id) => id === "CLT-MAC-OBFUS-003")).toEqual([]);
 	});
 
+	it("does not match osascript as a substring of a longer identifier (003 FP)", () => {
+		const ids = matchCommand(engine, "cat payload.b64 | base64 -D | grep osascriptable-tool");
+		expect(ids.filter((id) => id === "CLT-MAC-OBFUS-003")).toEqual([]);
+	});
+
 	it("does not match plutil -convert xml1 (harmless)", () => {
 		const ids = matchCommand(engine, "plutil -convert xml1 /tmp/plist.plist");
 		expect(ids.filter((id) => id === "CLT-MAC-OBFUS-006")).toEqual([]);
+	});
+
+	it("does not match a prose mention of osascript do shell script (001 FP)", () => {
+		const ids = matchCommand(engine, 'echo "osascript do shell script is a classic technique"');
+		expect(ids).not.toContain("CLT-MAC-OBFUS-001");
+	});
+
+	it("does not match a prose mention of osascript JXA (002 FP)", () => {
+		const ids = matchCommand(engine, 'echo "osascript -l JavaScript -e is a classic technique"');
+		expect(ids).not.toContain("CLT-MAC-OBFUS-002");
+	});
+
+	it("does not match a prose mention of base64 piped to osascript (003 FP)", () => {
+		const ids = matchCommand(
+			engine,
+			'echo "piping base64 -D output into osascript is a classic technique"',
+		);
+		expect(ids).not.toContain("CLT-MAC-OBFUS-003");
+	});
+
+	it("does not match a prose mention of xattr quarantine removal (005 FP)", () => {
+		const ids = matchCommand(engine, 'echo "xattr -d com.apple.quarantine is a classic technique"');
+		expect(ids).not.toContain("CLT-MAC-OBFUS-005");
+	});
+
+	it("does not match a prose mention of plutil -convert binary1 (006 FP)", () => {
+		const ids = matchCommand(engine, 'echo "plutil -convert binary1 is a classic technique"');
+		expect(ids).not.toContain("CLT-MAC-OBFUS-006");
+	});
+
+	it("does not match a prose mention of swift -e Process (007 FP)", () => {
+		const ids = matchCommand(engine, 'echo "swift -e Process() is a classic technique"');
+		expect(ids).not.toContain("CLT-MAC-OBFUS-007");
 	});
 });

@@ -130,6 +130,12 @@ describe("agent-layer threats", () => {
 				"CLT-SKL-002",
 			);
 		});
+
+		it("detects echo | base64 -d | powershell (SHELLS widen)", () => {
+			expect(
+				matchContent(engine, "echo 'aGVsbG8gd29ybGQgZnJvbSBiYXNlNjQ=' | base64 -d | powershell"),
+			).toContain("CLT-SKL-002");
+		});
 	});
 
 	// -------------------------------------------------------------------------

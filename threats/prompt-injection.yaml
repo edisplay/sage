@@ -9,6 +9,8 @@
 # The most common PI pattern family. Well-established attack surface.
 
 - id: "CLT-PI-001"
+  version: 1
+  detection_name: "Other:SagePromptInjection-A [Heur]"
   category: prompt_injection
   severity: critical
   confidence: 0.90
@@ -20,6 +22,8 @@
   revoked: false
 
 - id: "CLT-PI-002"
+  version: 1
+  detection_name: "Other:SagePromptInjection-B [Heur]"
   category: prompt_injection
   severity: critical
   confidence: 0.90
@@ -31,6 +35,8 @@
   revoked: false
 
 - id: "CLT-PI-003"
+  version: 1
+  detection_name: "Other:SagePromptInjection-C [Heur]"
   category: prompt_injection
   severity: critical
   confidence: 0.90
@@ -42,6 +48,8 @@
   revoked: false
 
 - id: "CLT-PI-004"
+  version: 1
+  detection_name: "Other:SagePromptInjection-D [Heur]"
   category: prompt_injection
   severity: critical
   confidence: 0.90
@@ -53,6 +61,8 @@
   revoked: false
 
 - id: "CLT-PI-005"
+  version: 1
+  detection_name: "Other:SagePromptInjection-E [Heur]"
   category: prompt_injection
   severity: warning
   confidence: 0.85
@@ -67,6 +77,8 @@
 # Attempts to reassign the AI's identity or role.
 
 - id: "CLT-PI-010"
+  version: 1
+  detection_name: "Other:SagePromptInjection-J [Heur]"
   category: prompt_injection
   severity: critical
   confidence: 0.90
@@ -78,6 +90,8 @@
   revoked: false
 
 - id: "CLT-PI-011"
+  version: 1
+  detection_name: "Other:SagePromptInjection-K [Heur]"
   category: prompt_injection
   severity: warning
   confidence: 0.85
@@ -92,6 +106,8 @@
   # an activation prefix (pretend/act as/you are) before the persona name.
 
 - id: "CLT-PI-012"
+  version: 1
+  detection_name: "Other:SagePromptInjection-L [Heur]"
   category: prompt_injection
   severity: warning
   confidence: 0.85
@@ -103,6 +119,8 @@
   revoked: false
 
 - id: "CLT-PI-013"
+  version: 1
+  detection_name: "Other:SagePromptInjection-M [Heur]"
   category: prompt_injection
   severity: warning
   confidence: 0.85
@@ -117,6 +135,8 @@
 # Attempts to disable safety mechanisms.
 
 - id: "CLT-PI-020"
+  version: 1
+  detection_name: "Other:SagePromptInjection-T [Heur]"
   category: prompt_injection
   severity: critical
   confidence: 0.85
@@ -128,6 +148,8 @@
   revoked: false
 
 - id: "CLT-PI-021"
+  version: 1
+  detection_name: "Other:SagePromptInjection-U [Heur]"
   category: prompt_injection
   severity: warning
   confidence: 0.85
@@ -139,6 +161,8 @@
   revoked: false
 
 - id: "CLT-PI-022"
+  version: 1
+  detection_name: "Other:SagePromptInjection-V [Heur]"
   category: prompt_injection
   severity: warning
   confidence: 0.80
@@ -150,6 +174,8 @@
   revoked: false
 
 - id: "CLT-PI-023"
+  version: 1
+  detection_name: "Other:SagePromptInjection-W [Heur]"
   category: prompt_injection
   severity: critical
   confidence: 0.90
@@ -164,6 +190,8 @@
 # Instructions to hide activity from the user.
 
 - id: "CLT-PI-030"
+  version: 1
+  detection_name: "Other:SagePromptInjection-AD [Heur]"
   category: prompt_injection
   severity: critical
   confidence: 0.90
@@ -178,6 +206,8 @@
 # Attempts to extract the system prompt or instructions.
 
 - id: "CLT-PI-040"
+  version: 1
+  detection_name: "Other:SagePromptInjection-AN [Heur]"
   category: prompt_injection
   severity: warning
   confidence: 0.85
@@ -189,6 +219,8 @@
   revoked: false
 
 - id: "CLT-PI-041"
+  version: 1
+  detection_name: "Other:SagePromptInjection-AO [Heur]"
   category: prompt_injection
   severity: warning
   confidence: 0.85
@@ -200,6 +232,8 @@
   revoked: false
 
 - id: "CLT-PI-042"
+  version: 1
+  detection_name: "Other:SagePromptInjection-AP [Heur]"
   category: prompt_injection
   severity: warning
   confidence: 0.85
@@ -211,6 +245,8 @@
   revoked: false
 
 - id: "CLT-PI-043"
+  version: 1
+  detection_name: "Other:SagePromptInjection-AQ [Heur]"
   category: prompt_injection
   severity: warning
   confidence: 0.85
@@ -225,6 +261,8 @@
 # Injection hiding in HTML, markdown, or JSON structures.
 
 - id: "CLT-PI-050"
+  version: 1
+  detection_name: "Other:SagePromptInjection-AX [Heur]"
   category: prompt_injection
   severity: warning
   confidence: 0.85
@@ -239,6 +277,8 @@
   # for keywords appearing within 20 chars of the opening tag.
 
 - id: "CLT-PI-051"
+  version: 1
+  detection_name: "Other:SagePromptInjection-AY [Heur]"
   category: prompt_injection
   severity: warning
   confidence: 0.85
@@ -251,6 +291,8 @@
   revoked: false
 
 - id: "CLT-PI-052"
+  version: 1
+  detection_name: "Other:SagePromptInjection-AZ [Heur]"
   category: prompt_injection
   severity: warning
   confidence: 0.85
@@ -269,6 +311,8 @@
 # Fake conversation turn markers to confuse the model.
 
 - id: "CLT-PI-060"
+  version: 1
+  detection_name: "Other:SagePromptInjection-BH [Heur]"
   category: prompt_injection
   severity: warning
   confidence: 0.85
@@ -280,6 +324,8 @@
   revoked: false
 
 - id: "CLT-PI-061"
+  version: 1
+  detection_name: "Other:SagePromptInjection-BI [Heur]"
   category: prompt_injection
   severity: warning
   confidence: 0.85
@@ -294,6 +340,8 @@
 # Obfuscated injection attempts.
 
 - id: "CLT-PI-070"
+  version: 1
+  detection_name: "Other:SagePromptInjection-BR [Heur]"
   category: prompt_injection
   severity: warning
   confidence: 0.60
@@ -309,6 +357,8 @@
 # are NOT PI — these only match when combined with credential targets.
 
 - id: "CLT-PI-080"
+  version: 1
+  detection_name: "Other:SagePromptInjection-CB [Heur]"
   category: prompt_injection
   severity: warning
   confidence: 0.80
@@ -320,6 +370,8 @@
   revoked: false
 
 - id: "CLT-PI-081"
+  version: 1
+  detection_name: "Other:SagePromptInjection-CC [Heur]"
   category: prompt_injection
   severity: warning
   confidence: 0.80
@@ -339,6 +391,8 @@
 # Sage-specific modifications to each rule are noted in its comment block.
 
 - id: "CLT-PI-091"
+  version: 1
+  detection_name: "Other:SagePromptInjection-CM [Heur]"
   category: prompt_injection
   severity: warning
   confidence: 0.85
@@ -356,6 +410,8 @@
   # precision signal.
 
 - id: "CLT-PI-092"
+  version: 1
+  detection_name: "Other:SagePromptInjection-CN [Heur]"
   category: prompt_injection
   severity: warning
   confidence: 0.85
@@ -372,6 +428,8 @@
   # capitalized variants (Act/You/Pretend/Be) to cover sentence-start phrasing.
 
 - id: "CLT-PI-093"
+  version: 1
+  detection_name: "Other:SagePromptInjection-CO [Heur]"
   category: prompt_injection
   severity: warning
   confidence: 0.85

@@ -13,6 +13,8 @@ export async function loadEngine(): Promise<HeuristicsEngine> {
 export function makeThreat(overrides: Partial<Threat> = {}): Threat {
 	return {
 		id: "CLT-TEST-001",
+		version: 1,
+		detectionName: "Other:SageTest-A [Heur]",
 		category: "tool",
 		severity: "critical",
 		confidence: 0.95,

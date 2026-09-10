@@ -31,6 +31,14 @@ describe("Windows obfuscation threats", () => {
 		);
 	});
 
+	it("detects certutil.exe -decode (WIN-OBFUS-002)", () => {
+		// {{NOT_FILENAME}} rejects a trailing dot, so an optional `.exe` suffix
+		// must be admitted ahead of it for the real invocation to still match.
+		expect(matchCommand(engine, "certutil.exe -decode encoded.b64 output.exe")).toContain(
+			"CLT-WIN-OBFUS-002",
+		);
+	});
+
 	it("detects -WindowStyle Hidden (WIN-OBFUS-003)", () => {
 		expect(matchCommand(engine, "powershell -WindowStyle Hidden -File script.ps1")).toContain(
 			"CLT-WIN-OBFUS-003",
@@ -238,6 +246,60 @@ describe("Windows obfuscation threats", () => {
 
 	it("does not match powershell numeric XOR (016 FP)", () => {
 		const ids = matchCommand(engine, "powershell $result = 0xFF -bxor 0x0F");
+		expect(ids).not.toContain("CLT-WIN-OBFUS-016");
+	});
+
+	it("does not match a prose mention of certutil -decode (002 FP)", () => {
+		const ids = matchCommand(engine, 'echo "certutil -decode is a classic technique"');
+		expect(ids).not.toContain("CLT-WIN-OBFUS-002");
+	});
+
+	it("detects mshta.exe with an .exe suffix (007)", () => {
+		// NOT_FILENAME rejects a trailing dot, so the optional .exe suffix
+		// must be consumed ahead of it, same as CLT-MITRE-096 (tscon).
+		expect(matchCommand(engine, 'mshta.exe vbscript:Execute("MsgBox 1")')).toContain(
+			"CLT-WIN-OBFUS-007",
+		);
+	});
+
+	it("does not match a prose mention of mshta vbscript (007 FP)", () => {
+		const ids = matchCommand(engine, 'echo "mshta vbscript:Execute is a classic technique"');
+		expect(ids).not.toContain("CLT-WIN-OBFUS-007");
+	});
+
+	it("does not match a prose mention of mshta javascript (008 FP)", () => {
+		const ids = matchCommand(engine, 'echo "mshta javascript:eval is a classic technique"');
+		expect(ids).not.toContain("CLT-WIN-OBFUS-008");
+	});
+
+	it("does not match a prose mention of wscript //E: (009 FP)", () => {
+		const ids = matchCommand(engine, 'echo "wscript //E:VBScript is a classic technique"');
+		expect(ids).not.toContain("CLT-WIN-OBFUS-009");
+	});
+
+	it("does not match a prose mention of the cmd caret shape (013 FP)", () => {
+		const ids = matchCommand(engine, 'echo "cmd p^o^w^e^r obfuscation is a classic technique"');
+		expect(ids).not.toContain("CLT-WIN-OBFUS-013");
+	});
+
+	it("does not match a prose mention of the cmd substring-concat shape (014 FP)", () => {
+		const ids = matchCommand(
+			engine,
+			'echo "cmd %comspec:~0,1% obfuscation is a classic technique"',
+		);
+		expect(ids).not.toContain("CLT-WIN-OBFUS-014");
+	});
+
+	it("does not match a prose mention of the powershell backtick shape (015 FP)", () => {
+		const ids = matchCommand(
+			engine,
+			'echo "powershell I`n`v`o`k`e obfuscation is a classic technique"',
+		);
+		expect(ids).not.toContain("CLT-WIN-OBFUS-015");
+	});
+
+	it("does not match a prose mention of powershell -bxor (016 FP)", () => {
+		const ids = matchCommand(engine, 'echo "powershell -bxor obfuscation is a classic technique"');
 		expect(ids).not.toContain("CLT-WIN-OBFUS-016");
 	});
 });

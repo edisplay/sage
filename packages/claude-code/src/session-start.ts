@@ -265,10 +265,12 @@ async function main(): Promise<void> {
 
 	// Auto-configure status line (after status file exists)
 	let statusLineHint: string | null = null;
-	try {
-		statusLineHint = await configureStatusLine(pluginRoot, branding);
-	} catch {
-		// Best-effort — don't block session start
+	if (config.manage_status_line) {
+		try {
+			statusLineHint = await configureStatusLine(pluginRoot, branding);
+		} catch {
+			// Best-effort — don't block session start
+		}
 	}
 
 	const allowlistMigration = await checkAllowlistMigration();

@@ -367,4 +367,24 @@ describe("credential threats", () => {
 	it("does not match tar czf x.tar.gz .envrc (008 FP — not .env)", () => {
 		expect(matchCommand(engine, "tar czf x.tar.gz .envrc")).not.toContain("CLT-CRED-008");
 	});
+
+	it("does not match a prose mention of export SECRET_TOKEN (002 FP)", () => {
+		const ids = matchCommand(engine, 'echo "export SECRET_TOKEN=... is a classic technique"');
+		expect(ids).not.toContain("CLT-CRED-002");
+	});
+
+	it("does not match a prose mention of cat .env (004 FP)", () => {
+		const ids = matchCommand(engine, 'echo "cat .env is a classic technique"');
+		expect(ids).not.toContain("CLT-CRED-004");
+	});
+
+	it("does not match a prose mention of cp .env (007 FP)", () => {
+		const ids = matchCommand(engine, 'echo "cp .env /tmp/backup is a classic technique"');
+		expect(ids).not.toContain("CLT-CRED-007");
+	});
+
+	it("does not match a prose mention of tar czf .env (008 FP)", () => {
+		const ids = matchCommand(engine, 'echo "tar czf secrets.tar.gz .env is a classic technique"');
+		expect(ids).not.toContain("CLT-CRED-008");
+	});
 });

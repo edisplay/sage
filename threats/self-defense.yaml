@@ -6,10 +6,16 @@
 
 # Delete .sage directory
 - id: "CLT-SELF-001"
+  version: 1
+  detection_name: "CMD:SageSelfDefense-A [Heur]"
   category: self_defense
   severity: critical
   confidence: 0.60
-  pattern: "(rm|del|rmdir|rd|Remove-Item|unlink)\\s.*\\.sage(\\s|[\\\\/]|$)"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-CMD-009. The bare
+  # verb alternation fired on prose warning against the deletion (this is
+  # Sage's own self-protection rule, so an agent merely explaining not to
+  # delete .sage would self-trigger it).
+  pattern: "{{CMD_POS}}(rm|del|rmdir|rd|Remove-Item|unlink){{NOT_FILENAME}}\\s.*\\.sage(\\s|[\\\\/]|$)"
   case_insensitive: true
   match_on: command
   title: "Attempt to delete Sage configuration directory"
@@ -18,6 +24,8 @@
 
 # Access Sage config files
 - id: "CLT-SELF-002"
+  version: 1
+  detection_name: "FN:SageSelfDefense-B [Heur]"
   category: self_defense
   severity: warning
   confidence: 0.60
@@ -29,10 +37,13 @@
 
 # Delete Claude Code hook or plugin config
 - id: "CLT-SELF-003"
+  version: 1
+  detection_name: "CMD:SageSelfDefense-C [Heur]"
   category: self_defense
   severity: warning
   confidence: 0.60
-  pattern: "(rm|del|Remove-Item|unlink)\\s.*\\.claude[\\\\/].*(hooks\\.json|installed_plugins)"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-SELF-001 above.
+  pattern: "{{CMD_POS}}(rm|del|Remove-Item|unlink){{NOT_FILENAME}}\\s.*\\.claude[\\\\/].*(hooks\\.json|installed_plugins)"
   case_insensitive: true
   match_on: command
   title: "Attempt to delete Claude Code hook or plugin configuration"
@@ -41,6 +52,8 @@
 
 # Disable Sage security features via config
 - id: "CLT-SELF-004"
+  version: 1
+  detection_name: "Other:SageSelfDefense-D [Heur]"
   category: self_defense
   severity: warning
   confidence: 0.60

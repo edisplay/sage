@@ -108,7 +108,7 @@ These thresholds are fixed constants (`0.99` / `0.5`). Medium-risk results that 
 
 **Suspicious-band telemetry (observability only).** PI results scoring in the band `[0.95, 0.99)` on a non-`deny` verdict emit a non-blocking event to `/v2/heuristic`, gated on `config.community_iq`. This never changes the decision.
 
-The raw `risk` score is preserved in audit signal metadata (`pi_checks[].risk`) for debugging.
+PI audit and telemetry signals append the engine shorthand, model ID, model schema, and common Sage suffix to the stable canonical name: `Other:SagePromptInjectionML-A [Susp]|sgml:pi-model:v2|sage`. User-facing notifications keep the unsuffixed canonical name. The raw `risk` score and model ID also remain in separate metadata fields for debugging and model rollout analysis.
 
 ---
 

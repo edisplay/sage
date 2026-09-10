@@ -60,4 +60,22 @@ describe("macOS supply chain threats", () => {
 		const ids = matchCommand(engine, "installer -pkg /tmp/local.pkg -target /");
 		expect(ids.filter((id) => id === "CLT-MAC-SUPPLY-002")).toEqual([]);
 	});
+
+	it("does not match a prose mention of brew install (001 FP)", () => {
+		const ids = matchCommand(engine, 'echo "brew install wget without a version pin is risky"');
+		expect(ids.filter((id) => id === "CLT-MAC-SUPPLY-001")).toEqual([]);
+	});
+
+	it("does not match a prose mention of installer -pkg (002 FP)", () => {
+		const ids = matchCommand(
+			engine,
+			'echo "installer -pkg https://evil.com/payload.pkg is a classic technique"',
+		);
+		expect(ids.filter((id) => id === "CLT-MAC-SUPPLY-002")).toEqual([]);
+	});
+
+	it("does not match a prose mention of brew install --cask (003 FP)", () => {
+		const ids = matchCommand(engine, 'echo "brew install --cask suspicious-app is worth checking"');
+		expect(ids.filter((id) => id === "CLT-MAC-SUPPLY-003")).toEqual([]);
+	});
 });

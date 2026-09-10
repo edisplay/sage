@@ -33,6 +33,7 @@ packages/
 | `config-defaults.ts` | Default config serializer and `~/.sage/config.defaults.json` deployment |
 | `cache.ts` | JSON file verdict cache with TTLs |
 | `audit-log.ts` | JSONL audit logging |
+| `detection-names.ts` | Stable canonical names for Sage-owned detection signals |
 | `trusted-domains.ts` | Trusted domain loading and matching |
 | `tool-names.ts` | Canonical tool vocabulary and generic canonicalization helper |
 | `plugin-scanner.ts` | Plugin file scanning |
@@ -464,11 +465,49 @@ Rules ship in the `threats/` directory at the repository root:
 | `mitre.yaml` | MITRE ATT&CK technique mappings |
 | `win-*.yaml` | Windows-specific variants of the above |
 | `mac-*.yaml` | macOS-specific variants (osascript, Keychain, LOLBins, defense evasion) |
+| `_macros.yaml` | Shared pattern vocabulary, not rules — see below |
+
+### Shared Pattern Vocabulary
+
+Several fragments are needed by many rules: the anchor meaning "this program is being executed", the list of shell interpreters, the guard that stops `foo` matching `foo.py`. Copied between rules they drift apart, so `threats/_macros.yaml` holds them once.
+
+A rule references a macro as `{{NAME}}` anywhere in `pattern`, and `threat-loader.ts` substitutes it before compiling:
+
+```yaml
+  pattern: "{{CMD_POS}}shred{{NOT_FILENAME}}{{HAS_ARG}}"
+```
+
+#### What is available
+
+| Macro | Stands for | Reach for it when |
+|---|---|---|
+| `{{CMD_POS}}` | everything left of a program name: boundary, dispatch context, wrapper prefix, path | the rule means "this program is being run" — see [Writing Command-Position Patterns](#writing-command-position-patterns) |
+| `{{NOT_FILENAME}}` | trailing guard, `(?![-\w.])` | directly after a program name, so `shred` does not also match `shred.py` or `shred-probe` |
+| `{{HAS_ARG}}` | lookahead requiring one argument | a bare mention of the program must not fire. The cost is missing an invocation with no arguments |
+| `{{SHELLS}}` | the interpreter alternation — `bash`, `sh`, `zsh`, `dash`, `ksh`, `ash`, `busybox`, `powershell`, `pwsh` | the rule concerns a shell taking a command payload |
+| `{{CMD_PREFIX}}` | wrapper commands, their flags, `--`, `VAR=value` assignments | building block of `{{CMD_POS}}`; rarely wanted on its own |
+| `{{DISPATCH_CTX}}` | `find … -exec`, a shell `-c` payload, a `cmd /c` payload, an `ssh host "…"` payload | building block of `{{CMD_POS}}`; rarely wanted on its own |
+| `{{NOT_COMPOUND_LEFT}}` / `{{NOT_COMPOUND_RIGHT}}` | symmetric guard, `(?<![-\w])` / `(?![-\w])` | the identifier appears only as an argument value (a WMI class name), never as a program name, so `{{CMD_POS}}` doesn't apply — but it must still not match inside a longer identifier or hyphenated compound |
+| `{{NOT_AFTER_TEXT_CMD}}` | backward-looking denylist guard | an argument-position identifier (see above) also needs to not fire on a quoted mention (`grep -rn "…"`, `echo "… is a classic technique"`) — see [When `{{CMD_POS}}` doesn't apply](#when-cmd_pos-doesnt-apply) |
+
+#### Loader behaviour
+
+| Situation | Result |
+|---|---|
+| A macro references another macro | Resolved until no references remain, up to five passes |
+| A rule references an undefined or over-nested macro | Rule skipped with a warning, as with an uncompilable pattern |
+| A mapping in any file other than `_macros.yaml` | Treated as a rule file missing its list: skipped with a warning, not read as vocabulary |
+| A rule list inside `_macros.yaml` | Skipped with a warning; the reserved file must be a mapping |
+| A rule loads successfully | `Threat.pattern` holds the *expanded* regex, so audit entries and false-positive reports show what actually ran |
+
+Add a macro whenever a second rule would otherwise copy a fragment.
 
 ### Rule Schema
 
 ```yaml
 - id: "CLT-CMD-001"
+  version: 1
+  detection_name: "CMD:SageCommand-A [Heur]"
   category: tool
   severity: critical
   confidence: 0.95
@@ -484,6 +523,8 @@ Rules ship in the `threats/` directory at the repository root:
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | string | Unique identifier (e.g. `CLT-CMD-001`) |
+| `version` | positive integer | Authored rule revision. Increment it whenever the rule's detection semantics change. |
+| `detection_name` | string | Stable canonical analytics identity in `Prefix:Family-Variant [Postfix]` form. |
 | `category` | string | Threat category — see canonical values below |
 | `severity` | enum | `critical`, `warning`, or `info` |
 | `confidence` | float | 0.0–1.0, used with sensitivity thresholds to determine verdict |
@@ -494,6 +535,12 @@ Rules ship in the `threats/` directory at the repository root:
 | `revoked` | boolean | Set `true` to disable a rule without removing it |
 | `flags` | string[] | *(optional)* Behavioral flags. Supported: `"report"` (send signal to backend) |
 | `case_insensitive` | boolean | *(optional)* Match pattern case-insensitively (default: `false`) |
+
+`id`, `version`, and the YAML-authored `detection_name` are separate metadata contracts. The immutable `id` is the engineering identity, `version` tracks authored rule revisions, and the authored name is the stable canonical identity shown on user-facing surfaces. A version bump must never change the authored detection name; create a new rule identity if the detection concept itself changes. Do not put changing values such as rule versions, package coordinates, model IDs, scores, or AMSI result codes into YAML.
+
+When Sage writes audit signals or sends telemetry/false-positive reports, it derives a reporting name in the form `<canonical name>|<engine shorthand>:<optional data>|sage`. Heuristics use `sghe:<rule id>:<rule version>`, package checks use `sgpk:<package name>[:<version>]`, prompt-injection ML uses `sgml:<model id>:<model schema>`, and AMSI uses `sgam:<AMSI rule name>:<amsi result hex>`. AMSI rule names are `AMSI_DETECTED`, `AMSI_BLOCKED_BY_ADMIN`, or `AMSI_UNKNOWN`; the value is lowercase hexadecimal without a `0x` prefix (for example, `sgam:AMSI_DETECTED:8000` for result `0x8000`). Every reporting name ends in `|sage`. Keep these reporting suffixes out of YAML and user notifications.
+
+Rule authors must increment `version` manually when changing a pattern, confidence, severity, match target, category, or other behavior that can change matching or verdicts. Documentation-only edits do not require a bump. Automatic version-bump enforcement is deferred; review the version explicitly with every rule change.
 
 **Canonical category values:**
 
@@ -530,6 +577,92 @@ Rules ship in the `threats/` directory at the repository root:
 | `relaxed` | 0.95 | 0.70 |
 
 A rule with `confidence: 0.95` denies under all presets; one with `confidence: 0.60` asks under paranoid and balanced, allows under relaxed. See [docs/decision-pipeline.md](decision-pipeline.md) for the full policy model.
+
+### Writing Command-Position Patterns
+
+A rule with `match_on: command` receives the entire command string. There is no shell parsing and no notion of `argv[0]`, so nothing in the input distinguishes a program being executed from its name appearing in an argument, a path, or a quoted string. A rule meaning "this program is being run" has to say so in the regex.
+
+Do not write that anchor per rule — use `{{CMD_POS}}`:
+
+```yaml
+  pattern: "{{CMD_POS}}shred{{NOT_FILENAME}}{{HAS_ARG}}"
+```
+
+#### Anatomy
+
+`{{CMD_POS}}` covers items 1–5; the rule supplies 6 and 7. `CLT-CMD-009` is the reference implementation.
+
+```
+  ls;  sudo -u root  bash -c "  env FOO=1  /usr/bin/  shred  -u f"
+  (1)  (2)           (3)        (4)        (5)        (6)    (7)
+```
+
+| | Part | Matches |
+|---|---|---|
+| 1 | command boundary | `^`, `;`, `&`, <code>&#124;</code>, `(`, newline, backtick |
+| 2 | wrapper prefix | `sudo`, `doas`, `env`, `nohup`, `time`, `xargs`, `wsl` — with their flags, `--` and `VAR=value`. Optional |
+| 3 | dispatch context | `find … -exec`, a shell `-c` payload, `cmd /c`, `ssh host "…"`. Optional |
+| 4 | wrapper prefix again | the dispatched payload is a fresh command line, so the same tokens may precede its program |
+| 5 | path prefix | `/usr/bin/`. Optional |
+| 6 | the program name | supplied by the rule, followed by `{{NOT_FILENAME}}` |
+| 7 | its arguments | `{{HAS_ARG}}` requires at least one |
+
+Three terms recur below. **Command position** is where a program name may legally appear: after a boundary, or inside a dispatched payload. A **dispatch context** is a point where one command line starts another. A **prefix token** is a word that may precede a program name without changing which word is the program.
+
+#### When `{{CMD_POS}}` doesn't apply
+
+Not needing a path prefix is not by itself a reason to skip `{{CMD_POS}}` — the prefix it allows is optional. A cmdlet occupies command position exactly like a binary does, so it still wants `{{CMD_POS}}foo{{NOT_FILENAME}}`; `CLT-WIN-CMD-036` is the reference implementation.
+
+The real disqualifier is an identifier that legitimately appears as an *argument value*, not a program name — a WMI class name passed as `-Class CommandLineEventConsumer`. `{{CMD_PREFIX}}`'s generic flag-value branch consumes `-Class CommandLineEventConsumer` whole while looking for a next program name, so `{{CMD_POS}}` never gets a chance to anchor on the class name itself; requiring command position here breaks the real detection. These still need a boundary — `\bfoo\b` has the same filename/compound-identifier problem as any other bare pattern — but only the symmetric guard, `{{NOT_COMPOUND_LEFT}}foo{{NOT_COMPOUND_RIGHT}}`. `CLT-WIN-PERSIST-008` is the reference implementation.
+
+That guard alone still lets a quoted mention through — `grep "CommandLineEventConsumer"` — since a search/print command in front of the identifier isn't a boundary the guard can see. `{{NOT_AFTER_TEXT_CMD}}` closes that with a backward-looking denylist of text/search/print commands (`grep`, `awk`, `echo`, `Write-Host`, …); see `_macros.yaml` for the matching mechanism, the denylist rationale, and known gaps. `CLT-WIN-PERSIST-008` combines both guards: `{{NOT_AFTER_TEXT_CMD}}{{NOT_COMPOUND_LEFT}}foo{{NOT_FILENAME}}` (using `{{NOT_FILENAME}}` in place of `{{NOT_COMPOUND_RIGHT}}` also rejects a trailing dot, e.g. `foo.md`). Both guards are zero-width lookbehinds anchored at the same position, so their relative order doesn't affect matching — this order just mirrors the rule file.
+
+#### What it does not match
+
+Deliberate gaps, listed so you can recognise them rather than debug them:
+
+| Not matched | Why |
+|---|---|
+| `docker run img bash -c "foo …"` | dispatch through a wrapper that is not on the list |
+| `/bin/bash -c "foo …"`, `C:\Windows\System32\cmd.exe /c foo` | a dispatcher named by absolute path; only the *program* takes a path prefix, not the dispatcher |
+| `su -c "foo …"` | runs a command but is not a shell, so it is not a dispatch context |
+| `echo "(shred -u f)"` | `(` and backtick are boundaries unconditionally, so a quoted mention containing one still fires — this one is a false positive, not a miss |
+| `cmd /c powershell -Command foo …` | the dispatched payload is itself another dispatch; `{{CMD_POS}}` models one hop, not a chain |
+| `bash -c sudo foo …` (unquoted, multiple tokens) | POSIX `-c` takes exactly one argument as the command string — everything after it becomes `$0`, `$1`, ... positional parameters, not executed text, so only `sudo` (with no arguments) actually runs. `{{POSIX_SHELLS}}` therefore requires a quote for multi-token payloads; PowerShell and `cmd` don't, because they rejoin unquoted trailing words into one command line instead. A single trailing token (`bash -c foo`) is exempt — nothing is left over to misattribute, so it's the entire command string either way |
+
+Widen these by adding names, on evidence. Never by relaxing the prefix into free-form text.
+
+#### Constraints when changing the macro
+
+Each of these prevents a specific false positive or evasion.
+
+**A word boundary is not command position.** `\bfoo\b` matches inside filenames (`foo.py`), path segments (`foo-latency-probe`) and quoted prose (`grep -rn "foo"`), because `.`, `-` and `/` are non-word characters.
+
+**A whitespace boundary is not either.** `(^|\s|[;&|])foo` also accepts *argument* position: `man foo | head`, `command -v foo`, `which foo && echo ok`, `cp /tmp/foo /tmp/out`.
+
+**A quote is not a command boundary.** Treating `"` as one makes any text mentioning the command match, including `git commit -m "… sudo foo …"`. Gate quoted payloads on the `-c` flag of a known shell, or an `ssh` argument.
+
+**Anchor every alternative you add**, or it becomes the next false-positive path. A dispatcher counts only when it is itself at command position, so what precedes it must be prefix tokens, never free-form text — otherwise `echo use bash -c "foo -u f"` reads as an invocation. Where a marker is meaningful only under one command, require that command: `-exec` requires a `find`. Test each alternative by asking what the pattern does when the whole command line is `echo <alternative> …`.
+
+**Prefer a miss to a false positive.** The residual risk is asymmetric: a false positive here is unusual prose, while a miss is an evasion, since wrapping in `bash -c "…"` is how an anchored rule gets sidestepped. That asymmetry is why dispatch contexts exist at all.
+
+**Keep every repetition unambiguous.** A loop whose branches can both consume the same token backtracks exponentially:
+
+```
+(?:-{1,2}[\w-]+(?:[= ]\S+)?\s+)*    # exponential — 32 flags ≈ 167 ms
+```
+
+`-a` parses either as a bare flag or as a flag whose space-separated value is the next flag, and both parses let the loop continue. The fix is to make the branches mutually exclusive, so no single token can match two of them — here, a space-separated flag value may neither start with `-` nor contain `=`:
+
+```
+(?:--\s+|--?[\w][\w-]*(?:=\S+|\s[^\s\-=][^\s=]*)?\s+|[A-Za-z_]\w*=\S*\s+)*    # linear — 200 flags ≈ 0.02 ms
+```
+
+This matters more than tidiness: patterns are compiled raw in `threat-loader.ts` with no complexity check and matched with a bare `.test()` with no timeout, so a catastrophic pattern hangs the hook rather than failing open.
+
+**Bound character runs, not token loops.** An open-ended character run needs a ceiling (`{0,200}`, not `*`) because it can wander. A loop over mutually exclusive whole tokens is already linear, and capping it creates an evasion instead: inert padding pushes the program past the cap and the rule goes quiet. Bound what protects the engine, never what an attacker controls the length of.
+
+Add a timing fixture for any new repetition — see "matches long argument runs in linear time" in `command-threats.test.ts`.
 
 ### What Gets Checked
 

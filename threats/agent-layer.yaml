@@ -38,6 +38,8 @@
 # ===========================================================================
 
 - id: "CLT-MCP-004"
+  version: 1
+  detection_name: "Other:SageMcp-D [Heur]"
   category: mcp_poisoning
   severity: warning
   confidence: 0.85
@@ -59,6 +61,8 @@
 # ===========================================================================
 
 - id: "CLT-SKL-001"
+  version: 1
+  detection_name: "Other:SageSkill-A [Heur]"
   category: skill_compromise
   severity: critical
   confidence: 0.85
@@ -78,10 +82,12 @@
 # CLT-SKL-003 intentionally omitted — dropped for FP risk during ATR curation.
 
 - id: "CLT-SKL-002"
+  version: 1
+  detection_name: "Other:SageSkill-B [Heur]"
   category: skill_compromise
   severity: critical
   confidence: 0.85
-  pattern: "(eval\\s*\\$\\(\\s*echo\\s+[\"'][A-Za-z0-9+/=]{20,}[\"']\\s*\\|\\s*base64\\s+-d|echo\\s+[\"'][A-Za-z0-9+/=]{20,}[\"']\\s*\\|\\s*base64\\s+(-d|--decode)\\s*\\|\\s*(bash|sh|python|node|ruby|perl))"
+  pattern: "(eval\\s*\\$\\(\\s*echo\\s+[\"'][A-Za-z0-9+/=]{20,}[\"']\\s*\\|\\s*base64\\s+-d|echo\\s+[\"'][A-Za-z0-9+/=]{20,}[\"']\\s*\\|\\s*base64\\s+(-d|--decode)\\s*\\|\\s*(?:{{SHELLS}}|python|node|ruby|perl))"
   match_on: content
   case_insensitive: true
   title: "Base64-encoded payload piped to interpreter inside skill content"
@@ -90,6 +96,8 @@
   # Source: ATR-2026-00121 (pattern unchanged from upstream).
 
 - id: "CLT-SKL-004"
+  version: 1
+  detection_name: "Other:SageSkill-D [Heur]"
   category: skill_compromise
   severity: critical
   confidence: 0.85
@@ -104,6 +112,8 @@
   # exfil-keyword focus (distinct from CLT-PI-002's instruction-override focus).
 
 - id: "CLT-SKL-005"
+  version: 1
+  detection_name: "Other:SageSkill-E [Heur]"
   category: skill_compromise
   severity: critical
   confidence: 0.95
@@ -118,6 +128,8 @@
   # injection signature with no legitimate use.
 
 - id: "CLT-SKL-006"
+  version: 1
+  detection_name: "Other:SageSkill-F [Heur]"
   category: skill_compromise
   severity: critical
   confidence: 0.85
@@ -137,6 +149,8 @@
 # CLT-SKL-007 intentionally omitted — dropped for FP risk during ATR curation.
 
 - id: "CLT-SKL-008"
+  version: 1
+  detection_name: "Other:SageSkill-H [Heur]"
   category: skill_compromise
   severity: warning
   confidence: 0.85
@@ -154,6 +168,8 @@
 # ===========================================================================
 
 - id: "CLT-CTX-003"
+  version: 1
+  detection_name: "Other:SageContext-C [Heur]"
   category: context_exfiltration
   severity: critical
   confidence: 0.95
@@ -172,6 +188,8 @@
 # ===========================================================================
 
 - id: "CLT-SUPPLY-002"
+  version: 1
+  detection_name: "Other:SageSupplyChain-B [Heur]"
   category: supply_chain
   severity: warning
   confidence: 0.95

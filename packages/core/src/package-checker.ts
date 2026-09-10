@@ -58,6 +58,7 @@ export class PackageChecker {
 			if (pkg.name.startsWith("@")) {
 				results.push({
 					packageName: pkg.name,
+					packageVersion: pkg.version,
 					registry: pkg.registry,
 					verdict: "clean",
 					confidence: 1.0,
@@ -87,6 +88,7 @@ export class PackageChecker {
 		} catch {
 			return {
 				packageName: pkg.name,
+				packageVersion: pkg.version,
 				registry: pkg.registry,
 				verdict: "unknown",
 				confidence: 0.6,
@@ -97,6 +99,7 @@ export class PackageChecker {
 		if (metadata === null) {
 			return {
 				packageName: pkg.name,
+				packageVersion: pkg.version,
 				registry: pkg.registry,
 				verdict: "not_found",
 				confidence: 0.95,
@@ -108,6 +111,7 @@ export class PackageChecker {
 		if (!metadata.requestedVersionFound && pkg.version) {
 			return {
 				packageName: pkg.name,
+				packageVersion: pkg.version,
 				registry: pkg.registry,
 				verdict: "not_found",
 				confidence: 0.95,
@@ -126,6 +130,7 @@ export class PackageChecker {
 							fileResult.detectionNames.length > 0 ? fileResult.detectionNames.join(", ") : sev;
 						return {
 							packageName: pkg.name,
+							packageVersion: pkg.version,
 							registry: pkg.registry,
 							verdict: "malicious",
 							confidence: 1.0,
@@ -150,6 +155,7 @@ export class PackageChecker {
 		if (ageDays !== undefined && ageDays < SUSPICIOUS_AGE_DAYS) {
 			return {
 				packageName: pkg.name,
+				packageVersion: pkg.version,
 				registry: pkg.registry,
 				verdict: "suspicious_age",
 				confidence: 0.6,
@@ -161,6 +167,7 @@ export class PackageChecker {
 		// Step 4: Clean
 		return {
 			packageName: pkg.name,
+			packageVersion: pkg.version,
 			registry: pkg.registry,
 			verdict: "clean",
 			confidence: 1.0,

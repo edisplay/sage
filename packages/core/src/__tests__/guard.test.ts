@@ -155,6 +155,23 @@ describe("formatDenyMessage", () => {
 		);
 		expect(msg).toContain("exfil");
 	});
+
+	it("surfaces the rule id and names it in the FP hint", () => {
+		const msg = formatDenyMessage(
+			makeVerdict({ decision: "deny", source: "heuristic", matchedThreatId: "CLT-CMD-001" }),
+		);
+		expect(msg).toContain("Rule: CLT-CMD-001");
+		expect(msg).toContain("(rule CLT-CMD-001)");
+	});
+
+	it("points user-exception blocks at the exceptions file instead of FP reporting", () => {
+		const msg = formatDenyMessage(
+			makeVerdict({ decision: "deny", source: "exception", matchedThreatId: "6e26ae6f" }),
+		);
+		expect(msg).toContain("Rule: 6e26ae6f (your exception rule)");
+		expect(msg).toContain("~/.sage/exceptions.json");
+		expect(msg).not.toContain("sage_report_false_positive");
+	});
 });
 
 describe("summarizeArtifacts", () => {

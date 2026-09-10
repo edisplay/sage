@@ -28,6 +28,7 @@ import {
 	MAX_CONTENT_SIZE,
 	readProductJsonVersion,
 	resolveBranding,
+	ruleLabel,
 	type Verdict,
 } from "@gendigital/sage-core";
 
@@ -855,11 +856,14 @@ function internalCursorResponse(
 }
 
 function truncateReason(verdict: Verdict, branding: Branding): string {
+	// Appended after truncation so the rule id is never the part that gets cut off.
+	const rule = ruleLabel(verdict);
+	const suffix = rule ? ` [rule ${rule}]` : "";
 	if (verdict.reasons.length === 0) {
-		return `${branding.name} flagged this action (${verdict.category}).`;
+		return `${branding.name} flagged this action (${verdict.category}).${suffix}`;
 	}
 	const joined = verdict.reasons.slice(0, 5).join("; ");
-	return joined.length <= 350 ? joined : `${joined.slice(0, 347)}...`;
+	return (joined.length <= 350 ? joined : `${joined.slice(0, 347)}...`) + suffix;
 }
 
 function getBundledDataDirs(): { threatsDir: string; trustedDomainsDir: string } {

@@ -1,5 +1,11 @@
 # @gendigital/sage-openclaw
 
+## 0.13.0
+
+### Minor Changes
+
+- Show triggering rule IDs in deny messages and false-positive guidance, with tailored guidance for user-defined exception rules.
+
 ## 0.12.0
 
 ### Minor Changes

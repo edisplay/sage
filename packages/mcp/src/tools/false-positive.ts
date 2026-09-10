@@ -34,6 +34,7 @@ type AuditRuntimeVerdictEntry = {
 	user_override?: unknown;
 	signals?: unknown;
 	content?: unknown;
+	content_snippet?: unknown;
 	hook_type?: unknown;
 };
 
@@ -83,6 +84,10 @@ function readContent(entry: AuditRuntimeVerdictEntry): Record<string, unknown> {
 	const raw = entry.content;
 	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
 	return raw as Record<string, unknown>;
+}
+
+function readContentSnippet(entry: AuditRuntimeVerdictEntry): string | undefined {
+	return asString(entry.content_snippet);
 }
 
 function isRuntimeVerdictEntry(v: unknown): v is AuditRuntimeVerdictEntry {
@@ -167,8 +172,11 @@ const ReportInputSchema = z.object({
 	dry_run: z.boolean().optional().describe("If true, do not POST; just show the payload."),
 });
 
-function parseAuditSignals(raw: unknown): {
-	heuristics?: { rule_id: string; rule_version?: number }[];
+function parseAuditSignals(
+	raw: unknown,
+	options: { includePiContentSnippet?: boolean } = {},
+): {
+	heuristics?: { detection_name?: string; rule_id: string; rule_version?: number }[];
 	url_checks?: { detection_name: string; url: string }[];
 	file_checks?: { detection_name: string; file_sha256: string }[];
 	package_checks?: {
@@ -178,9 +186,11 @@ function parseAuditSignals(raw: unknown): {
 		package_registry: string;
 	}[];
 	pi_checks?: {
+		detection_name?: string;
 		risk: number;
 		model_id: string;
 		content_name: string;
+		content_snippet?: string;
 	}[];
 	amsi_checks?: {
 		detection_name: string;
@@ -190,6 +200,7 @@ function parseAuditSignals(raw: unknown): {
 	}[];
 } {
 	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+	const includePiContentSnippet = options.includePiContentSnippet ?? true;
 	const obj = raw as Record<string, unknown>;
 
 	const heuristicsRaw = obj.heuristics;
@@ -204,11 +215,16 @@ function parseAuditSignals(raw: unknown): {
 				.map((h) => {
 					if (!h || typeof h !== "object" || Array.isArray(h)) return null;
 					const rec = h as Record<string, unknown>;
+					const detection_name = asString(rec.detection_name);
 					const rule_id = asString(rec.rule_id);
 					const rule_version =
 						typeof rec.rule_version === "number" ? Math.trunc(rec.rule_version) : undefined;
 					if (!rule_id) return null;
-					return { rule_id, rule_version };
+					return {
+						...(detection_name ? { detection_name } : {}),
+						rule_id,
+						rule_version,
+					};
 				})
 				.filter(Boolean)
 		: undefined;
@@ -259,21 +275,29 @@ function parseAuditSignals(raw: unknown): {
 				.map((m) => {
 					if (!m || typeof m !== "object" || Array.isArray(m)) return null;
 					const rec = m as Record<string, unknown>;
+					const detection_name = asString(rec.detection_name);
 					const risk = typeof rec.risk === "number" ? rec.risk : undefined;
 					const model_id = asString(rec.model_id);
 					const content_name = asString(rec.content_name);
+					const content_snippet = asString(rec.content_snippet);
 					if (risk === undefined || !model_id || !content_name) return null;
-					return { risk, model_id, content_name };
+					return {
+						...(detection_name ? { detection_name } : {}),
+						risk,
+						model_id,
+						content_name,
+						...(content_snippet && includePiContentSnippet ? { content_snippet } : {}),
+					};
 				})
 				.filter(Boolean)
 		: undefined;
 
-	// AMSI signals carry a synthesized `detection_name` (the Win32 AMSI API only
+	// AMSI signals carry a reporting `detection_name` (the Win32 AMSI API only
 	// returns a numeric threat level, so `evaluator.ts:buildAmsiSignal` derives
-	// the label from `amsi_result`). Forwarding this entry preserves that
-	// synthesized name in the FP payload so the backend can triage AMSI-driven
-	// denies; otherwise the only AMSI evidence available downstream would be
-	// the free-text reasons string.
+	// the canonical label and appends `sgam:<AMSI rule name>:<hex result>|sage`).
+	// Forwarding this entry preserves the full name in the FP payload so the
+	// backend can triage AMSI-driven denies; otherwise the only AMSI evidence
+	// available downstream would be the free-text reasons string.
 	const amsi_checks = Array.isArray(amsiChecksRaw)
 		? amsiChecksRaw
 				.map((a) => {
@@ -298,7 +322,11 @@ function parseAuditSignals(raw: unknown): {
 	return {
 		heuristics:
 			heuristics && heuristics.length > 0
-				? (heuristics as { rule_id: string; rule_version?: number }[])
+				? (heuristics as {
+						detection_name?: string;
+						rule_id: string;
+						rule_version?: number;
+					}[])
 				: undefined,
 		url_checks:
 			url_checks && url_checks.length > 0
@@ -319,7 +347,13 @@ function parseAuditSignals(raw: unknown): {
 				: undefined,
 		pi_checks:
 			pi_checks && pi_checks.length > 0
-				? (pi_checks as { risk: number; model_id: string; content_name: string }[])
+				? (pi_checks as {
+						detection_name?: string;
+						risk: number;
+						model_id: string;
+						content_name: string;
+						content_snippet?: string;
+					}[])
 				: undefined,
 		amsi_checks:
 			amsi_checks && amsi_checks.length > 0
@@ -394,7 +428,11 @@ export function registerFalsePositiveTools(
 					severity: asString(e.severity),
 					source: asString(e.source),
 					user_override: e.user_override,
-					signals: parseAuditSignals(e.signals),
+					// PI snippets are untrusted fetched content. Exclude their raw
+					// text—including the generic top-level content_snippet - from this
+					// model-visible response. Retain it only for the backend-only
+					// false-positive report below.
+					signals: parseAuditSignals(e.signals, { includePiContentSnippet: false }),
 					content: readContent(e),
 				}));
 
@@ -559,11 +597,21 @@ export function registerFalsePositiveTools(
 						const agent_runtime = asString(e.agent_runtime) ?? "unknown";
 						const tool_type = asString(e.tool_name) ?? "Unknown";
 						const verdict = asString(e.verdict) ?? "deny";
-						const user_action = e.user_override === true ? "allowed" : "blocked";
+						// Explicitly selected allow entries have no user override, but were
+						// still allowed on the user's machine. Reporting them as blocked
+						// would contradict the audit verdict and corrupt FP telemetry.
+						const wasAllowed = verdict === "allow" || e.user_override === true;
+						const user_action = wasAllowed ? "allowed" : "blocked";
 						const hook_type = asHookType(e.hook_type) ?? "PreToolUse";
 
-						const signals = parseAuditSignals(e.signals);
+						// Dry-run output is returned directly to the model. Do not expose
+						// untrusted PI text there, including the generic top-level
+						// content_snippet; preserve it only for actual backend reports.
+						const signals = parseAuditSignals(e.signals, {
+							includePiContentSnippet: !dry_run,
+						});
 						const content = readContent(e);
+						const contentSnippet = readContentSnippet(e);
 
 						const bestEffortSignals: Record<string, unknown> = {};
 						if (signals.heuristics) bestEffortSignals.heuristics = signals.heuristics;
@@ -591,6 +639,7 @@ export function registerFalsePositiveTools(
 									? { signals: bestEffortSignals }
 									: {}),
 								content,
+								...(contentSnippet && !dry_run ? { content_snippet: contentSnippet } : {}),
 							},
 							comment,
 							event_id: entry_id ?? randomUUID(),

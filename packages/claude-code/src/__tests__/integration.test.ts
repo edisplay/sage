@@ -462,6 +462,47 @@ describe("SessionStart hook integration", () => {
 		});
 	}, 30_000);
 
+	it("skips the statusLine install with manage_status_line off", async () => {
+		writeClaudeSettings({});
+		writeSageFile("config.json", JSON.stringify({ manage_status_line: false }));
+		try {
+			const { code } = await runHook(SESSION_START, { session_id: "sl-unmanaged" });
+
+			expect(code).toBe(0);
+			expect(readClaudeSettings().statusLine).toBeUndefined();
+		} finally {
+			removeSageFile("config.json");
+		}
+	}, 30_000);
+
+	it("keeps nagging about a custom status line by default", async () => {
+		writeClaudeSettings({ statusLine: { type: "command", command: "ccstatusline" } });
+
+		const { stdout, code } = await runHook(SESSION_START, { session_id: "sl-default" });
+
+		expect(code).toBe(0);
+		expect(readClaudeSettings().statusLine).toMatchObject({ command: "ccstatusline" });
+		expect(parseResponse(stdout).systemMessage).toContain("custom status line");
+	}, 30_000);
+
+	// The gates are independent: opting out of status-line management must not
+	// cost the user the banner confirming Sage is running, nor the hint.
+	it("suppresses the custom status line hint with manage_status_line off", async () => {
+		writeClaudeSettings({ statusLine: { type: "command", command: "ccstatusline" } });
+		writeSageFile("config.json", JSON.stringify({ manage_status_line: false }));
+		try {
+			const { stdout, code } = await runHook(SESSION_START, { session_id: "sl-unmanaged-custom" });
+
+			expect(code).toBe(0);
+			expect(readClaudeSettings().statusLine).toMatchObject({ command: "ccstatusline" });
+			const msg = parseResponse(stdout).systemMessage as string | undefined;
+			expect(msg).not.toContain("custom status line");
+			expect(msg).toContain("No threats found");
+		} finally {
+			removeSageFile("config.json");
+		}
+	}, 30_000);
+
 	// session-start passes dist-relative worker paths to runPluginScan; if a
 	// bundle is missing the worker silently never spawns (fail-open), so guard
 	// the build output here.

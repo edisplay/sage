@@ -400,6 +400,20 @@ export async function computeSkillIdsForRoot(
 			// (rejects before reading the file that crosses it), so there is no
 			// separate pre-check walk and no way for the two to diverge.
 			const entries = await entriesFromDirectory(folder, MAX_SKILL_BYTES);
+			// Discovery and enumeration disagree here: `findSkillPackagesWithMtime`
+			// accepts this folder because `stat` follows a symlinked `SKILL.md`, while
+			// the walk above drops every file whose realpath escapes the folder (the
+			// containment rule that stops a skill from having Sage read, hash and
+			// upload arbitrary files). A skill kept outside its folder by a dotfile
+			// manager (chezmoi, GNU stow) therefore enumerates to nothing.
+			//
+			// The skill goes unanalyzed either way (`walkPluginFiles` applies the same
+			// containment rule, so the heuristics never see it either) — this only
+			// stops the pointless traffic and the cache deferral that came with it.
+			if (entries.length === 0) {
+				logger?.warn("Skill enumerates to no entries; not analyzable, skipping", { folder });
+				continue;
+			}
 			const { skillId } = computeSkillId(entries);
 			out.push({ folder, skillId });
 		} catch (e) {

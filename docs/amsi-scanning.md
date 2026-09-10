@@ -61,7 +61,7 @@ AMSI denials are recorded in the audit log entry's `signals.amsi_checks` array a
 
 | Field | Description |
 |-------|-------------|
-| `detection_name` | Synthesized label — `AMSI|DETECTED` (result ≥ 32768) or `AMSI|BLOCKED_BY_ADMIN` (16384 ≤ result < 32768). The Win32 AMSI API returns only a numeric threat level, not a named detection like other reputation services. |
+| `detection_name` | Reporting identity — the canonical class name followed by `\|sgam:<AMSI rule name>:<amsi_result_hex>\|sage`. Rule names are `AMSI_DETECTED`, `AMSI_BLOCKED_BY_ADMIN`, or `AMSI_UNKNOWN`. The result is lowercase hexadecimal without a `0x` prefix, for example `Other:SageAmsiBlockedByAdmin-A [Heur]\|sgam:AMSI_BLOCKED_BY_ADMIN:4000\|sage` for result `0x4000`. User notifications use the unsuffixed canonical name. The raw numeric result also remains in `amsi_result`. |
 | `content_name` | The label identifying what was scanned, e.g. `Bash:command`, `Write:<path>`, `Edit:<path>`. Home-directory paths are scrubbed to `~`. |
 | `content_snippet` | Optional excerpt of the scanned content, capped at 200 characters with home directories scrubbed. Self-contained for FP triage so the analyst sees the actual command or content that triggered the detection. |
 | `amsi_result` | Raw numeric AMSI result code from `AmsiScanBuffer`. |

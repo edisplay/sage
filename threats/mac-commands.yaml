@@ -7,10 +7,13 @@
 
 # osascript -e 'do shell script' (AppleScript shell execution)
 - id: "CLT-MAC-CMD-001"
+  version: 1
+  detection_name: "CMD:SageMacOSCommand-A [Heur]"
   category: tool
   severity: critical
   confidence: 0.95
-  pattern: "\\bosascript\\b.*-e.*do shell script"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-CMD-009.
+  pattern: "{{CMD_POS}}osascript{{NOT_FILENAME}}.*-e.*do shell script"
   case_insensitive: true
   match_on: command
   title: "AppleScript shell execution via osascript -e"
@@ -19,10 +22,13 @@
 
 # osascript -l JavaScript (JXA execution)
 - id: "CLT-MAC-CMD-002"
+  version: 1
+  detection_name: "CMD:SageMacOSCommand-B [Heur]"
   category: tool
   severity: critical
   confidence: 0.90
-  pattern: "\\bosascript\\b.*-l\\s+JavaScript"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-CMD-009.
+  pattern: "{{CMD_POS}}osascript{{NOT_FILENAME}}.*-l\\s+JavaScript"
   case_insensitive: true
   match_on: command
   title: "JavaScript for Automation (JXA) execution via osascript"
@@ -31,10 +37,15 @@
 
 # Pipe to osascript (stdin AppleScript execution)
 - id: "CLT-MAC-CMD-003"
+  version: 1
+  detection_name: "CMD:SageMacOSCommand-C [Heur]"
   category: tool
   severity: critical
   confidence: 0.90
-  pattern: "\\|\\s*osascript"
+  # {{NOT_FILENAME}} rejects a longer identifier (`osascriptable-formatter`);
+  # the pipe itself is already a real command-position boundary, so a full
+  # {{CMD_POS}} isn't needed here.
+  pattern: "\\|\\s*osascript{{NOT_FILENAME}}"
   match_on: command
   title: "Piped input to osascript (stdin AppleScript execution)"
   expires_at: null
@@ -42,10 +53,17 @@
 
 # osascript loading script file from remote download
 - id: "CLT-MAC-CMD-004"
+  version: 1
+  detection_name: "CMD:SageMacOSCommand-D [Heur]"
   category: tool
   severity: critical
   confidence: 0.90
-  pattern: "(curl|wget).*\\|.*osascript|osascript.*(curl|wget)"
+  # {{CMD_POS}} + {{NOT_FILENAME}} on both leading AND trailing identifiers of
+  # each alternative, same shape as CLT-CMD-009. Had no boundary at all. The
+  # trailing {{NOT_FILENAME}} matters here too -- without it, "osascript" and
+  # "curl"/"wget" match as substrings of longer identifiers
+  # (osascriptable-tool, start_curling_service).
+  pattern: "{{CMD_POS}}(curl|wget){{NOT_FILENAME}}.*\\|.*osascript{{NOT_FILENAME}}|{{CMD_POS}}osascript{{NOT_FILENAME}}.*(curl|wget){{NOT_FILENAME}}"
   case_insensitive: true
   match_on: command
   title: "Remote script download piped to osascript"
@@ -56,10 +74,13 @@
 
 # open -a Terminal (launch Terminal with script)
 - id: "CLT-MAC-CMD-005"
+  version: 1
+  detection_name: "CMD:SageMacOSCommand-E [Heur]"
   category: tool
   severity: warning
   confidence: 0.60
-  pattern: "\\bopen\\s+-a\\s+Terminal"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-CMD-009.
+  pattern: "{{CMD_POS}}open{{NOT_FILENAME}}\\s+-a\\s+Terminal"
   match_on: command
   title: "Launch Terminal application via open -a"
   expires_at: null
@@ -67,10 +88,13 @@
 
 # open with hidden/background flags
 - id: "CLT-MAC-CMD-006"
+  version: 1
+  detection_name: "CMD:SageMacOSCommand-F [Heur]"
   category: tool
   severity: warning
   confidence: 0.60
-  pattern: "\\bopen\\s+(-[jg]|--hide|--background)"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-MAC-CMD-005.
+  pattern: "{{CMD_POS}}open{{NOT_FILENAME}}\\s+(-[jg]|--hide|--background)"
   match_on: command
   title: "Launch application hidden/background via open"
   expires_at: null
@@ -80,10 +104,13 @@
 
 # dscl user/group manipulation
 - id: "CLT-MAC-CMD-007"
+  version: 1
+  detection_name: "CMD:SageMacOSCommand-G [Heur]"
   category: tool
   severity: warning
   confidence: 0.60
-  pattern: "\\bdscl\\b.*(-create|-delete|-passwd|-append)"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-CMD-009.
+  pattern: "{{CMD_POS}}dscl{{NOT_FILENAME}}.*(-create|-delete|-passwd|-append)"
   match_on: command
   title: "Directory Services user/group manipulation via dscl"
   expires_at: null
@@ -91,10 +118,13 @@
 
 # networksetup proxy/DNS manipulation
 - id: "CLT-MAC-CMD-008"
+  version: 1
+  detection_name: "CMD:SageMacOSCommand-H [Heur]"
   category: tool
   severity: warning
   confidence: 0.60
-  pattern: "\\bnetworksetup\\b.*(-setwebproxy|-setsocksfirewallproxy|-setdnsservers|-setautoproxyurl)"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-CMD-009.
+  pattern: "{{CMD_POS}}networksetup{{NOT_FILENAME}}.*(-setwebproxy|-setsocksfirewallproxy|-setdnsservers|-setautoproxyurl)"
   case_insensitive: true
   match_on: command
   title: "Network proxy/DNS manipulation via networksetup"
@@ -103,10 +133,13 @@
 
 # systemsetup enabling remote access
 - id: "CLT-MAC-CMD-009"
+  version: 1
+  detection_name: "CMD:SageMacOSCommand-I [Heur]"
   category: tool
   severity: critical
   confidence: 0.90
-  pattern: "\\bsystemsetup\\b.*(-setremotelogin\\s+on|-setwakeonnetworkaccess\\s+on)"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-CMD-009.
+  pattern: "{{CMD_POS}}systemsetup{{NOT_FILENAME}}.*(-setremotelogin\\s+on|-setwakeonnetworkaccess\\s+on)"
   case_insensitive: true
   match_on: command
   title: "Enable remote login/wake via systemsetup"
@@ -115,10 +148,14 @@
 
 # kickstart ARD remote management
 - id: "CLT-MAC-CMD-010"
+  version: 1
+  detection_name: "CMD:SageMacOSCommand-J [Heur]"
   category: tool
   severity: critical
   confidence: 0.90
-  pattern: "kickstart.*-activate.*-configure"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-CMD-009. Had no
+  # boundary at all.
+  pattern: "{{CMD_POS}}kickstart{{NOT_FILENAME}}.*-activate.*-configure"
   case_insensitive: true
   match_on: command
   title: "Apple Remote Desktop activation via kickstart"
@@ -127,10 +164,13 @@
 
 # installer -pkg -target / (silent package install)
 - id: "CLT-MAC-CMD-011"
+  version: 1
+  detection_name: "CMD:SageMacOSCommand-K [Heur]"
   category: tool
   severity: warning
   confidence: 0.60
-  pattern: "\\binstaller\\b.*-pkg.*-target"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-CMD-009.
+  pattern: "{{CMD_POS}}installer{{NOT_FILENAME}}.*-pkg.*-target"
   case_insensitive: true
   match_on: command
   title: "Silent package install via installer command"
@@ -139,10 +179,13 @@
 
 # hdiutil mount remote DMG
 - id: "CLT-MAC-CMD-012"
+  version: 1
+  detection_name: "CMD:SageMacOSCommand-L [Heur]"
   category: tool
   severity: warning
   confidence: 0.60
-  pattern: "\\bhdiutil\\b.*\\b(attach|mount)\\b.*https?://"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-CMD-009.
+  pattern: "{{CMD_POS}}hdiutil{{NOT_FILENAME}}.*\\b(attach|mount)\\b.*https?://"
   case_insensitive: true
   match_on: command
   title: "Mount remote DMG via hdiutil"
@@ -151,10 +194,13 @@
 
 # pkgutil --forget (package receipt manipulation)
 - id: "CLT-MAC-CMD-013"
+  version: 1
+  detection_name: "CMD:SageMacOSCommand-M [Heur]"
   category: tool
   severity: warning
   confidence: 0.60
-  pattern: "\\bpkgutil\\b.*--forget"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-CMD-009.
+  pattern: "{{CMD_POS}}pkgutil{{NOT_FILENAME}}.*--forget"
   match_on: command
   title: "Package receipt removal via pkgutil --forget"
   expires_at: null
@@ -164,10 +210,13 @@
 
 # diskutil eraseDisk
 - id: "CLT-MAC-CMD-014"
+  version: 1
+  detection_name: "CMD:SageMacOSCommand-N [Heur]"
   category: tool
   severity: critical
   confidence: 0.95
-  pattern: "\\bdiskutil\\b.*\\b(eraseDisk|partitionDisk|secureErase)\\b"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-CMD-009.
+  pattern: "{{CMD_POS}}diskutil{{NOT_FILENAME}}.*\\b(eraseDisk|partitionDisk|secureErase)\\b"
   match_on: command
   title: "Disk erase/partition via diskutil"
   expires_at: null
@@ -175,10 +224,13 @@
 
 # tmutil delete (Time Machine backup deletion — ransomware indicator)
 - id: "CLT-MAC-CMD-015"
+  version: 1
+  detection_name: "CMD:SageMacOSCommand-O [Heur]"
   category: tool
   severity: critical
   confidence: 0.95
-  pattern: "\\btmutil\\b.*\\b(delete|disable)\\b"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-CMD-009.
+  pattern: "{{CMD_POS}}tmutil{{NOT_FILENAME}}.*\\b(delete|disable)\\b"
   match_on: command
   title: "Time Machine backup deletion/disable via tmutil (ransomware indicator)"
   expires_at: null
@@ -188,10 +240,13 @@
 
 # spctl --master-disable (Gatekeeper disable)
 - id: "CLT-MAC-CMD-016"
+  version: 1
+  detection_name: "CMD:SageMacOSCommand-P [Heur]"
   category: tool
   severity: critical
   confidence: 0.95
-  pattern: "\\bspctl\\b.*--master-disable"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-CMD-009.
+  pattern: "{{CMD_POS}}spctl{{NOT_FILENAME}}.*--master-disable"
   match_on: command
   title: "Gatekeeper disable via spctl --master-disable"
   expires_at: null
@@ -199,10 +254,13 @@
 
 # csrutil disable (SIP disable)
 - id: "CLT-MAC-CMD-017"
+  version: 1
+  detection_name: "CMD:SageMacOSCommand-Q [Heur]"
   category: tool
   severity: critical
   confidence: 0.95
-  pattern: "\\bcsrutil\\b.*\\bdisable\\b"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-CMD-009.
+  pattern: "{{CMD_POS}}csrutil{{NOT_FILENAME}}.*\\bdisable\\b"
   match_on: command
   title: "System Integrity Protection disable via csrutil"
   expires_at: null
@@ -210,10 +268,15 @@
 
 # defaults write LSQuarantine (quarantine flag disable)
 - id: "CLT-MAC-CMD-018"
+  version: 1
+  detection_name: "CMD:SageMacOSCommand-R [Heur]"
   category: tool
   severity: critical
   confidence: 0.90
-  pattern: "\\bdefaults\\b.*\\bwrite\\b.*LSQuarantine"
+  # {{CMD_POS}} + {{NOT_FILENAME}} on `defaults`, same shape as CLT-CMD-009.
+  # The inner `\bwrite\b` is left as bare -- only reachable once `defaults`
+  # has already matched at command position.
+  pattern: "{{CMD_POS}}defaults{{NOT_FILENAME}}.*\\bwrite\\b.*LSQuarantine"
   case_insensitive: true
   match_on: command
   title: "Quarantine flag disable via defaults write LSQuarantine"
@@ -222,10 +285,13 @@
 
 # xattr -d com.apple.quarantine (quarantine removal)
 - id: "CLT-MAC-CMD-019"
+  version: 1
+  detection_name: "CMD:SageMacOSCommand-S [Heur]"
   category: tool
   severity: warning
   confidence: 0.60
-  pattern: "\\bxattr\\b.*-d.*com\\.apple\\.quarantine"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-CMD-009.
+  pattern: "{{CMD_POS}}xattr{{NOT_FILENAME}}.*-d.*com\\.apple\\.quarantine"
   match_on: command
   title: "Quarantine attribute removal via xattr"
   expires_at: null
@@ -233,10 +299,13 @@
 
 # pfctl -d (packet filter / firewall disable)
 - id: "CLT-MAC-CMD-020"
+  version: 1
+  detection_name: "CMD:SageMacOSCommand-T [Heur]"
   category: tool
   severity: critical
   confidence: 0.90
-  pattern: "\\bpfctl\\b.*\\s-d\\b"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-CMD-009.
+  pattern: "{{CMD_POS}}pfctl{{NOT_FILENAME}}.*\\s-d\\b"
   match_on: command
   title: "Packet filter (firewall) disable via pfctl -d"
   expires_at: null
@@ -244,10 +313,13 @@
 
 # tccutil reset (TCC privacy permissions reset)
 - id: "CLT-MAC-CMD-021"
+  version: 1
+  detection_name: "CMD:SageMacOSCommand-U [Heur]"
   category: tool
   severity: critical
   confidence: 0.90
-  pattern: "\\btccutil\\b.*\\breset\\b"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-CMD-009.
+  pattern: "{{CMD_POS}}tccutil{{NOT_FILENAME}}.*\\breset\\b"
   match_on: command
   title: "TCC privacy permissions reset via tccutil"
   expires_at: null
@@ -255,10 +327,13 @@
 
 # launchctl unload security daemons
 - id: "CLT-MAC-CMD-022"
+  version: 1
+  detection_name: "CMD:SageMacOSCommand-V [Heur]"
   category: tool
   severity: critical
   confidence: 0.90
-  pattern: "\\blaunchctl\\b.*\\b(unload|bootout)\\b.*(com\\.apple\\.MRT|com\\.apple\\.XProtect|com\\.apple\\.security)"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-CMD-009.
+  pattern: "{{CMD_POS}}launchctl{{NOT_FILENAME}}.*\\b(unload|bootout)\\b.*(com\\.apple\\.MRT|com\\.apple\\.XProtect|com\\.apple\\.security)"
   case_insensitive: true
   match_on: command
   title: "Unload macOS security daemon via launchctl"
@@ -267,10 +342,13 @@
 
 # defaults write to disable macOS security features
 - id: "CLT-MAC-CMD-023"
+  version: 1
+  detection_name: "CMD:SageMacOSCommand-W [Heur]"
   category: tool
   severity: critical
   confidence: 0.90
-  pattern: "\\bdefaults\\b.*\\bwrite\\b.*(com\\.apple\\.Finder\\s+AppleShowAllFiles|com\\.apple\\.LaunchServices\\s+LSQuarantine|com\\.apple\\.loginwindow)"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-MAC-CMD-018.
+  pattern: "{{CMD_POS}}defaults{{NOT_FILENAME}}.*\\bwrite\\b.*(com\\.apple\\.Finder\\s+AppleShowAllFiles|com\\.apple\\.LaunchServices\\s+LSQuarantine|com\\.apple\\.loginwindow)"
   case_insensitive: true
   match_on: command
   title: "Modify macOS security-related defaults"
@@ -281,10 +359,13 @@
 
 # dscl . -passwd (change user password)
 - id: "CLT-MAC-CMD-024"
+  version: 1
+  detection_name: "CMD:SageMacOSCommand-X [Heur]"
   category: tool
   severity: critical
   confidence: 0.90
-  pattern: "\\bdscl\\b.*\\s-passwd\\b"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-MAC-CMD-007.
+  pattern: "{{CMD_POS}}dscl{{NOT_FILENAME}}.*\\s-passwd\\b"
   match_on: command
   title: "User password change via dscl"
   expires_at: null
@@ -292,10 +373,13 @@
 
 # dseditgroup add user to admin
 - id: "CLT-MAC-CMD-025"
+  version: 1
+  detection_name: "CMD:SageMacOSCommand-Y [Heur]"
   category: tool
   severity: critical
   confidence: 0.95
-  pattern: "\\bdseditgroup\\b.*-o\\s+edit.*-a.*admin"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-CMD-009.
+  pattern: "{{CMD_POS}}dseditgroup{{NOT_FILENAME}}.*-o\\s+edit.*-a.*admin"
   match_on: command
   title: "Add user to admin group via dseditgroup"
   expires_at: null
@@ -303,10 +387,14 @@
 
 # createhomedir — create home directory for arbitrary user
 - id: "CLT-MAC-CMD-026"
+  version: 1
+  detection_name: "CMD:SageMacOSCommand-Z [Heur]"
   category: tool
   severity: warning
   confidence: 0.60
-  pattern: "\\bcreatehomedir\\b"
+  # {{CMD_POS}} requires command position; {{HAS_ARG}} drops a bare mention,
+  # since createhomedir with no flags just prints usage.
+  pattern: "{{CMD_POS}}createhomedir{{NOT_FILENAME}}{{HAS_ARG}}"
   match_on: command
   title: "Create home directory for user via createhomedir"
   expires_at: null
@@ -318,10 +406,13 @@
 
 # screencapture to remote or hidden location
 - id: "CLT-MAC-CMD-027"
+  version: 1
+  detection_name: "CMD:SageMacOSCommand-AA [Heur]"
   category: tool
   severity: warning
   confidence: 0.60
-  pattern: "\\bscreencapture\\b.*(-x|-C)"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-CMD-009.
+  pattern: "{{CMD_POS}}screencapture{{NOT_FILENAME}}.*(-x|-C)"
   match_on: command
   title: "Silent screen capture via screencapture"
   expires_at: null

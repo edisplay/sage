@@ -5,6 +5,8 @@
 
 # --- System auth files ---
 - id: "CLT-FILE-001"
+  version: 1
+  detection_name: "FN:SageFile-A [Heur]"
   category: secrets
   severity: critical
   confidence: 0.95
@@ -16,6 +18,8 @@
 
 # --- SSH authorized_keys ---
 - id: "CLT-FILE-002"
+  version: 1
+  detection_name: "FN:SageFile-B [Heur]"
   category: secrets
   severity: critical
   confidence: 0.95
@@ -27,6 +31,8 @@
 
 # --- SSH private keys and config ---
 - id: "CLT-FILE-003"
+  version: 1
+  detection_name: "FN:SageFile-C [Heur]"
   category: secrets
   severity: warning
   confidence: 0.60
@@ -38,6 +44,8 @@
 
 # --- Shell RC files ---
 - id: "CLT-FILE-004"
+  version: 1
+  detection_name: "FN:SageFile-D [Heur]"
   category: tool
   severity: warning
   confidence: 0.60
@@ -49,6 +57,8 @@
 
 # --- Cron directories ---
 - id: "CLT-FILE-006"
+  version: 1
+  detection_name: "FN:SageFile-F [Heur]"
   category: tool
   severity: warning
   confidence: 0.60
@@ -60,6 +70,8 @@
 
 # --- systemd unit files ---
 - id: "CLT-FILE-007"
+  version: 1
+  detection_name: "FN:SageFile-G [Heur]"
   category: tool
   severity: warning
   confidence: 0.60
@@ -75,6 +87,8 @@
 # match CRED-003 but not FILE-008 — intentional, since file_path matching is more
 # targeted than command-string matching.
 - id: "CLT-FILE-008"
+  version: 1
+  detection_name: "FN:SageFile-H [Heur]"
   category: secrets
   severity: warning
   confidence: 0.60
@@ -86,6 +100,8 @@
 
 # --- Git hooks ---
 - id: "CLT-FILE-009"
+  version: 1
+  detection_name: "FN:SageFile-I [Heur]"
   category: tool
   severity: warning
   confidence: 0.60
@@ -97,6 +113,8 @@
 
 # --- Android signing files ---
 - id: "CLT-FILE-010"
+  version: 1
+  detection_name: "FN:SageFile-J [Heur]"
   category: secrets
   severity: warning
   confidence: 0.60
@@ -108,6 +126,8 @@
 
 # --- Firebase config files ---
 - id: "CLT-FILE-011"
+  version: 1
+  detection_name: "FN:SageFile-K [Heur]"
   category: secrets
   severity: warning
   confidence: 0.60
@@ -119,6 +139,8 @@
 
 # --- Cloud provider credential files ---
 - id: "CLT-FILE-012"
+  version: 1
+  detection_name: "FN:SageFile-L [Heur]"
   category: secrets
   severity: warning
   confidence: 0.60
@@ -130,6 +152,8 @@
 
 # --- Package manager tokens ---
 - id: "CLT-FILE-013"
+  version: 1
+  detection_name: "FN:SageFile-M [Heur]"
   category: secrets
   severity: warning
   confidence: 0.60
@@ -141,6 +165,8 @@
 
 # --- Terraform state files ---
 - id: "CLT-FILE-014"
+  version: 1
+  detection_name: "FN:SageFile-N [Heur]"
   category: secrets
   severity: warning
   confidence: 0.60
@@ -152,6 +178,8 @@
 
 # --- Secrets/vault files ---
 - id: "CLT-FILE-015"
+  version: 1
+  detection_name: "FN:SageFile-O [Heur]"
   category: secrets
   severity: warning
   confidence: 0.60
@@ -166,6 +194,8 @@
 # Accepted trade-off: require_approval keeps noise bounded, and excluding .pem
 # would miss private key exfiltration.
 - id: "CLT-FILE-016"
+  version: 1
+  detection_name: "FN:SageFile-P [Heur]"
   category: secrets
   severity: warning
   confidence: 0.60
@@ -177,6 +207,8 @@
 
 # --- Kubeconfig ---
 - id: "CLT-FILE-017"
+  version: 1
+  detection_name: "FN:SageFile-Q [Heur]"
   category: secrets
   severity: warning
   confidence: 0.60
@@ -188,6 +220,8 @@
 
 # --- Build system credential files ---
 - id: "CLT-FILE-018"
+  version: 1
+  detection_name: "FN:SageFile-R [Heur]"
   category: secrets
   severity: warning
   confidence: 0.60
@@ -199,6 +233,8 @@
 
 # --- Shell/REPL history files ---
 - id: "CLT-FILE-019"
+  version: 1
+  detection_name: "FN:SageFile-S [Heur]"
   category: secrets
   severity: warning
   confidence: 0.60
@@ -210,6 +246,8 @@
 
 # --- JetBrains IDE database credentials ---
 - id: "CLT-FILE-020"
+  version: 1
+  detection_name: "FN:SageFile-T [Heur]"
   category: secrets
   severity: warning
   confidence: 0.60

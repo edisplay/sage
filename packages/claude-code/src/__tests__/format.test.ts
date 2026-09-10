@@ -208,6 +208,29 @@ describe("formatBlockReason", () => {
 		expect(msg).toContain("━");
 	});
 
+	it("surfaces the threat rule id and names it in the FP hint", () => {
+		const msg = formatBlockReason(
+			makeVerdict({ source: "heuristic", matchedThreatId: "DUMMY-CMD-DENY-001" }),
+		);
+		expect(msg).toContain("Rule        DUMMY-CMD-DENY-001");
+		expect(msg).toContain("sage_report_false_positive");
+		expect(msg).toContain("(rule DUMMY-CMD-DENY-001)");
+	});
+
+	it("points user-exception blocks at the exceptions file instead of FP reporting", () => {
+		const msg = formatBlockReason(
+			makeVerdict({ source: "exception", matchedThreatId: "6e26ae6f" }),
+		);
+		expect(msg).toContain("Rule        6e26ae6f (your exception rule)");
+		expect(msg).toContain("~/.sage/exceptions.json");
+		expect(msg).not.toContain("sage_report_false_positive");
+	});
+
+	it("omits the Rule row when no rule backs the signal", () => {
+		// URL check / AMSI / package check have no rule id to show.
+		expect(formatBlockReason(makeVerdict())).not.toContain("Rule ");
+	});
+
 	it("renders ask verdict as Suspicious Activity with artifact", () => {
 		const msg = formatBlockReason(
 			makeVerdict({

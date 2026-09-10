@@ -15,28 +15,41 @@ function makeAmsiResult(overrides: Partial<AmsiCheckResult> = {}): AmsiCheckResu
 }
 
 describe("buildAmsiSignal", () => {
-	it("synthesizes 'AMSI|DETECTED' for amsi_result >= 0x8000", () => {
+	it("uses the canonical detected name for amsi_result >= 0x8000", () => {
 		const signal = buildAmsiSignal(
 			makeAmsiResult({ amsiResult: 0x8000, isDetected: true, content: "x" }),
 		);
-		expect(signal.detection_name).toBe("AMSI|DETECTED");
+		expect(signal.detection_name).toBe(
+			"Other:SageAmsiDetected-A [Heur]|sgam:AMSI_DETECTED:8000|sage",
+		);
 		expect(signal.amsi_result).toBe(0x8000);
 	});
 
-	it("synthesizes 'AMSI|BLOCKED_BY_ADMIN' for 0x4000 <= amsi_result < 0x8000", () => {
+	it("formats the AMSI rule and result as lowercase hexadecimal without a prefix", () => {
+		const signal = buildAmsiSignal(
+			makeAmsiResult({ amsiResult: 0x8abc, isDetected: true, content: "x" }),
+		);
+		expect(signal.detection_name).toBe(
+			"Other:SageAmsiDetected-A [Heur]|sgam:AMSI_DETECTED:8abc|sage",
+		);
+	});
+
+	it("uses the canonical admin-blocked name for 0x4000 <= amsi_result < 0x8000", () => {
 		const signal = buildAmsiSignal(
 			makeAmsiResult({ amsiResult: 0x4000, isBlockedByAdmin: true, content: "x" }),
 		);
-		expect(signal.detection_name).toBe("AMSI|BLOCKED_BY_ADMIN");
+		expect(signal.detection_name).toBe(
+			"Other:SageAmsiBlockedByAdmin-A [Heur]|sgam:AMSI_BLOCKED_BY_ADMIN:4000|sage",
+		);
 		expect(signal.amsi_result).toBe(0x4000);
 	});
 
-	it("uses defensive 'AMSI|UNKNOWN' label for non-detected/non-blocked results", () => {
+	it("uses a canonical unknown label for non-detected/non-blocked results", () => {
 		// Production callers in evaluator.ts filter to detected || blocked-by-admin first,
 		// so this branch should never fire in normal flow — but the helper must still emit
 		// a meaningful entry rather than silently corrupting the signal.
 		const signal = buildAmsiSignal(makeAmsiResult({ amsiResult: 1, content: "x" }));
-		expect(signal.detection_name).toBe("AMSI|UNKNOWN");
+		expect(signal.detection_name).toBe("Other:SageAmsiUnknown-A [Susp]|sgam:AMSI_UNKNOWN:1|sage");
 	});
 
 	it("populates content_name and amsi_result for a detected result", () => {

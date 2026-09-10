@@ -257,6 +257,52 @@ describe("skill-id", () => {
 			},
 		);
 
+		// Regression: a skill whose SKILL.md is symlinked out of the
+		// folder (chezmoi / GNU stow style) is discovered by one walk and enumerates
+		// to nothing in the other. That produced a skill id of sha256(zero bytes) and
+		// a member-less 22-byte zip, uploaded to the analyzer once per session start.
+		describe("skill whose SKILL.md is symlinked outside the folder", () => {
+			const buildSymlinkedSkill = async (): Promise<string> => {
+				const outside = join(tempRoot, "dotfiles");
+				await mkdir(outside, { recursive: true });
+				await writeFile(join(outside, "SKILL.md"), "---\nname: my-skill\n---\nbody\n");
+
+				const skillDir = join(tempRoot, "skills", "symlinked-skill");
+				await mkdir(skillDir, { recursive: true });
+				await symlink(join(outside, "SKILL.md"), join(skillDir, "SKILL.md"), "file");
+				return skillDir;
+			};
+
+			it.skipIf(!canCreateFileSymlink)(
+				"the two walks disagree: discovered as a package, enumerates to zero entries",
+				async () => {
+					const skillDir = await buildSymlinkedSkill();
+
+					// stat() follows the symlink, so discovery accepts the folder...
+					expect(await findSkillFolders(skillDir)).toEqual([skillDir]);
+					// ...but containment drops the file, leaving nothing to hash or zip.
+					expect(await entriesFromDirectory(skillDir)).toEqual([]);
+				},
+			);
+
+			it.skipIf(!canCreateFileSymlink)(
+				"computeSkillIdsForRoot skips it, so the all-zeros id is never queued",
+				async () => {
+					await buildSymlinkedSkill();
+					const normal = join(tempRoot, "skills", "normal-skill");
+					await mkdir(normal, { recursive: true });
+					await writeFile(join(normal, "SKILL.md"), "---\nname: normal\n---\nbody\n");
+
+					const out = await computeSkillIdsForRoot(join(tempRoot, "skills"));
+
+					// The unenumerable skill is dropped; its healthy sibling still returns.
+					expect(out.map((s) => s.folder)).toEqual([normal]);
+					const emptyTreeId = createHash("sha256").digest("hex");
+					expect(out.map((s) => s.skillId)).not.toContain(emptyTreeId);
+				},
+			);
+		});
+
 		it("findSkillPackagesWithMtime ignores symlinks that escape the root", async () => {
 			const outsideDir = join(tempRoot, "outside");
 			await mkdir(outsideDir, { recursive: true });

@@ -132,14 +132,30 @@ export class BundledPiProvider implements PiCheckProvider {
 			if (truncated.length === 0) return null;
 
 			const loaded = await this.ensureLoaded();
-			if (!loaded) return null;
+			if (!loaded) {
+				this.logger.info("PI model inference skipped", {
+					context,
+					reason: "model_unavailable",
+				});
+				return null;
+			}
 
 			const chunks = this.chunkText(truncated);
+			const modelId = basename(this.modelPath);
+			this.logger.info("PI model inference started", {
+				context,
+				modelId,
+				contentLength: content.length,
+				truncatedContentLength: truncated.length,
+				chunks: chunks.length,
+			});
 			let maxRisk = 0;
 			let maxChunk = "";
+			let chunksScanned = 0;
 
 			for (const chunk of chunks) {
 				if (chunk.length < 10) continue;
+				chunksScanned++;
 				const risk = await this.classifyChunk(chunk);
 				if (risk > maxRisk) {
 					maxRisk = risk;
@@ -153,13 +169,21 @@ export class BundledPiProvider implements PiCheckProvider {
 				findings.push(snippet);
 			}
 
-			return {
+			const result = {
 				risk: maxRisk,
 				findings,
 				contentName: context,
-				modelId: basename(this.modelPath),
+				modelId,
 				contentSnippet: maxChunk || undefined,
 			};
+			this.logger.info("PI model inference completed", {
+				context,
+				modelId,
+				risk: result.risk,
+				findingsCount: result.findings.length,
+				chunksScanned,
+			});
+			return result;
 		} catch (err) {
 			this.logger.warn("PI check failed (fail-open)", {
 				error: err instanceof Error ? err.message : String(err),

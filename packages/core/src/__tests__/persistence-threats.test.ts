@@ -105,6 +105,16 @@ describe("persistence threats", () => {
 		expect(ids).toContain("CLT-PERSIST-001");
 	});
 
+	it("detects redirect to an absolute RC path (001)", () => {
+		const ids = matchCommand(engine, "echo evil > /home/user/.bash_profile");
+		expect(ids).toContain("CLT-PERSIST-001");
+	});
+
+	it("detects redirect to a macOS home RC path (001)", () => {
+		const ids = matchCommand(engine, "echo evil > /Users/someone/.zshrc");
+		expect(ids).toContain("CLT-PERSIST-001");
+	});
+
 	// CLT-PERSIST-007: additional variants
 	it("detects printf append to ~/.profile (007)", () => {
 		const ids = matchCommand(engine, "printf '%s\\n' 'export PATH=/evil' >> ~/.profile");
@@ -126,5 +136,59 @@ describe("persistence threats", () => {
 	it("does not match echo to non-RC file (007 FP)", () => {
 		const ids = matchCommand(engine, 'echo "hello" >> /tmp/output.txt');
 		expect(ids).not.toContain("CLT-PERSIST-007");
+	});
+
+	// RC filenames must not match as a prefix of a longer filename
+	it("does not match redirect to profile.py (001 FP)", () => {
+		const ids = matchCommand(engine, `cd "/tmp/scratchpad" && cat > profile.py`);
+		expect(ids).not.toContain("CLT-PERSIST-001");
+	});
+
+	it("does not match redirect to profile.json (001 FP)", () => {
+		const ids = matchCommand(engine, "echo x > profile.json");
+		expect(ids).not.toContain("CLT-PERSIST-001");
+	});
+
+	it("does not match redirect to bashrc.bak.tar (001 FP)", () => {
+		const ids = matchCommand(engine, "tar czf - . > bashrc.bak.tar");
+		expect(ids).not.toContain("CLT-PERSIST-001");
+	});
+
+	it("does not match echo append to profile.py (007 FP)", () => {
+		const ids = matchCommand(engine, 'echo "hi" >> profile.py');
+		expect(ids).not.toContain("CLT-PERSIST-007");
+	});
+
+	// RC basenames outside a home directory are not startup files
+	it("does not match redirect to /tmp/.profile (001 FP)", () => {
+		const ids = matchCommand(engine, "echo x > /tmp/.profile");
+		expect(ids).not.toContain("CLT-PERSIST-001");
+	});
+
+	it("does not match redirect to a fixture .bashrc (001 FP)", () => {
+		const ids = matchCommand(engine, "echo x > ./fixtures/.bashrc");
+		expect(ids).not.toContain("CLT-PERSIST-001");
+	});
+
+	it("does not match a prose mention of crontab -e (002 FP)", () => {
+		const ids = matchCommand(engine, 'echo "run crontab -e to edit your schedule"');
+		expect(ids).not.toContain("CLT-PERSIST-002");
+	});
+
+	it("does not match a prose mention of systemctl enable (005 FP)", () => {
+		const ids = matchCommand(engine, 'echo "systemctl enable ssh is common"');
+		expect(ids).not.toContain("CLT-PERSIST-005");
+	});
+
+	it("does not match echo as a substring of another word (007 FP)", () => {
+		// The verb alternation had no boundary at all, so "echo" matched inside
+		// "myecho".
+		const ids = matchCommand(engine, "myecho evil >> ~/.bashrc");
+		expect(ids).not.toContain("CLT-PERSIST-007");
+	});
+
+	it("does not match a quoted mention of the at-job shape (008 FP)", () => {
+		const ids = matchCommand(engine, 'grep -rn "at now" schedule.log');
+		expect(ids).not.toContain("CLT-PERSIST-008");
 	});
 });

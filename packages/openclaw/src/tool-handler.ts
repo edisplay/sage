@@ -25,6 +25,7 @@ import {
 	formatDenyMessage,
 	guardToolCall,
 	type Logger,
+	ruleLabel,
 	summarizeArtifacts,
 } from "@gendigital/sage-core";
 
@@ -222,6 +223,7 @@ export function createToolCallHandler(
 							? `; ... and ${verdict.reasons.length - maxReasons} more`
 							: "")
 					: verdict.category;
+			const rule = ruleLabel(verdict);
 			const intersected = artifacts.filter((a) => verdict.artifacts.includes(a.value));
 			const flaggedArtifacts = intersected.length > 0 ? intersected : artifacts;
 
@@ -239,6 +241,7 @@ export function createToolCallHandler(
 					title: `${branding.name}: ${verdict.category}`,
 					description: [
 						`Severity: ${verdict.severity}`,
+						...(rule ? [`Rule: ${rule}`] : []),
 						`Reason: ${reasons}`,
 						`Artifacts: ${summarizeArtifacts(artifacts)}`,
 					].join("\n"),

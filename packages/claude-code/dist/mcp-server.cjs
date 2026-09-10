@@ -4265,7 +4265,8 @@ var init_types2 = __esm({
     VerdictSeveritySchema = external_exports.enum(["info", "warning", "critical"]);
     ThreatSchema = external_exports.object({
       id: external_exports.string(),
-      version: external_exports.number().int().optional(),
+      version: external_exports.number().int().positive(),
+      detectionName: external_exports.string(),
       category: external_exports.string(),
       severity: VerdictSeveritySchema,
       confidence: external_exports.number(),
@@ -4367,6 +4368,7 @@ var init_types2 = __esm({
       sensitivity: SensitivitySchema.default("balanced"),
       disabled_threats: external_exports.array(external_exports.string()).default([]),
       announce_clean_scans: external_exports.boolean().default(true),
+      manage_status_line: external_exports.boolean().default(true),
       brand_key: external_exports.string().min(1).max(32).regex(/^[a-z0-9_-]+$/u).optional(),
       community_iq: external_exports.boolean().default(true)
     });
@@ -21189,12 +21191,16 @@ async function logVerdict(config2, input) {
     severity: input.verdict.severity,
     reasons: input.verdict.reasons,
     source: input.verdict.source,
+    threat_id: input.verdict.matchedThreatId,
     user_override: userOverride,
     signals: input.signals,
     tool_use_id: input.toolUseId
   };
   if (input.content !== void 0) {
     entry.content = input.content;
+  }
+  if (input.contentSnippet !== void 0) {
+    entry.content_snippet = input.contentSnippet;
   }
   try {
     await appendEntry(config2, entry);
@@ -22028,7 +22034,7 @@ init_file_utils();
 var import_meta = {};
 function resolveVersion() {
   if (true)
-    return "0.12.0";
+    return "0.13.0";
   try {
     const pkgPath = (0, import_node_path4.join)((0, import_node_path4.dirname)((0, import_node_url.fileURLToPath)(import_meta.url)), "..", "package.json");
     const pkg = JSON.parse(getFileContentSync(pkgPath));
@@ -22588,14 +22594,29 @@ var BundledPiProvider = class _BundledPiProvider {
       if (truncated.length === 0)
         return null;
       const loaded = await this.ensureLoaded();
-      if (!loaded)
+      if (!loaded) {
+        this.logger.info("PI model inference skipped", {
+          context,
+          reason: "model_unavailable"
+        });
         return null;
+      }
       const chunks = this.chunkText(truncated);
+      const modelId = (0, import_node_path8.basename)(this.modelPath);
+      this.logger.info("PI model inference started", {
+        context,
+        modelId,
+        contentLength: content.length,
+        truncatedContentLength: truncated.length,
+        chunks: chunks.length
+      });
       let maxRisk = 0;
       let maxChunk = "";
+      let chunksScanned = 0;
       for (const chunk of chunks) {
         if (chunk.length < 10)
           continue;
+        chunksScanned++;
         const risk = await this.classifyChunk(chunk);
         if (risk > maxRisk) {
           maxRisk = risk;
@@ -22607,13 +22628,21 @@ var BundledPiProvider = class _BundledPiProvider {
         const snippet = maxChunk.length > 80 ? `${maxChunk.slice(0, 77)}...` : maxChunk;
         findings.push(snippet);
       }
-      return {
+      const result = {
         risk: maxRisk,
         findings,
         contentName: context,
-        modelId: (0, import_node_path8.basename)(this.modelPath),
+        modelId,
         contentSnippet: maxChunk || void 0
       };
+      this.logger.info("PI model inference completed", {
+        context,
+        modelId,
+        risk: result.risk,
+        findingsCount: result.findings.length,
+        chunksScanned
+      });
+      return result;
     } catch (err) {
       this.logger.warn("PI check failed (fail-open)", {
         error: err instanceof Error ? err.message : String(err),
@@ -22825,6 +22854,56 @@ var SNIFF_CSV = /^[^,\n]+(?:,[^,\n]+){2,}$/m;
 function isScannableContent(content) {
   const head = content.slice(0, 4096);
   return SNIFF_HTML.test(head) || SNIFF_HTML_TAGS.test(head) || SNIFF_JSON.test(head) || SNIFF_XML.test(head) || SNIFF_YAML.test(head) || SNIFF_SHEBANG_SHELL.test(head) || SNIFF_SHEBANG_PYTHON.test(head) || SNIFF_PYTHON.test(head) || SNIFF_JS_TS.test(head) || SNIFF_C_CPP.test(head) || SNIFF_KOTLIN.test(head) || SNIFF_CSV.test(head);
+}
+
+// ../core/dist/detection-names.js
+var PI_DETECTION_NAME = "Other:SagePromptInjectionML-A [Susp]";
+var REPORTING_ENGINE_SHORTHANDS = {
+  package: "sgpk",
+  amsi: "sgam",
+  heuristics: "sghe",
+  ml: "sgml"
+};
+var REPORTING_DETECTION_SUFFIX = "sage";
+function formatReportingDetectionName(canonicalName, engine, optionalData = "") {
+  const engineMetadata = optionalData ? `${REPORTING_ENGINE_SHORTHANDS[engine]}:${optionalData}` : REPORTING_ENGINE_SHORTHANDS[engine];
+  return `${canonicalName}|${engineMetadata}|${REPORTING_DETECTION_SUFFIX}`;
+}
+var PACKAGE_DETECTION_NAMES = {
+  not_found: "Other:SagePackageNotFound-A [Susp]",
+  suspicious_age: "Other:SagePackageNew-A [Susp]",
+  malicious: "Other:SagePackageMalicious-A [Trj]",
+  unknown: "Other:SagePackageUnknown-A [Susp]"
+};
+var AMSI_DETECTION_NAMES = {
+  detected: "Other:SageAmsiDetected-A [Heur]",
+  blocked_by_admin: "Other:SageAmsiBlockedByAdmin-A [Heur]",
+  unknown: "Other:SageAmsiUnknown-A [Susp]"
+};
+var AMSI_REPORTING_RULE_NAMES = {
+  detected: "AMSI_DETECTED",
+  blocked_by_admin: "AMSI_BLOCKED_BY_ADMIN",
+  unknown: "AMSI_UNKNOWN"
+};
+function isCanonicalDetectionName(name) {
+  return /^\w+:\w+-[A-Z]+ \[[^\]\r\n]+\]$/.test(name);
+}
+function packageDetectionName(verdict) {
+  return PACKAGE_DETECTION_NAMES[verdict];
+}
+function amsiDetectionClass(amsiResult) {
+  if (amsiResult >= 32768)
+    return "detected";
+  if (amsiResult >= 16384)
+    return "blocked_by_admin";
+  return "unknown";
+}
+function amsiDetectionName(amsiResult) {
+  return AMSI_DETECTION_NAMES[amsiDetectionClass(amsiResult)];
+}
+function amsiReportingData(amsiResult) {
+  const ruleName = AMSI_REPORTING_RULE_NAMES[amsiDetectionClass(amsiResult)];
+  return `${ruleName}:${Math.trunc(amsiResult).toString(16)}`;
 }
 
 // ../core/dist/extended-info.js
@@ -23079,7 +23158,8 @@ async function sendCommunityIqTelemetry(args) {
       ...blocking ? { user_action: "blocked" } : {},
       timestamp: (/* @__PURE__ */ new Date()).toISOString(),
       ...args.signals && Object.keys(args.signals).length > 0 ? { signals: args.signals } : {},
-      content: args.content ?? {}
+      content: args.content ?? {},
+      ...args.contentSnippet ? { content_snippet: args.contentSnippet } : {}
     },
     event_id: args.eventId,
     comment: ""
@@ -23919,6 +23999,7 @@ var PackageChecker = class {
       if (pkg.name.startsWith("@")) {
         results.push({
           packageName: pkg.name,
+          packageVersion: pkg.version,
           registry: pkg.registry,
           verdict: "clean",
           confidence: 1,
@@ -23939,6 +24020,7 @@ var PackageChecker = class {
     } catch {
       return {
         packageName: pkg.name,
+        packageVersion: pkg.version,
         registry: pkg.registry,
         verdict: "unknown",
         confidence: 0.6,
@@ -23948,6 +24030,7 @@ var PackageChecker = class {
     if (metadata === null) {
       return {
         packageName: pkg.name,
+        packageVersion: pkg.version,
         registry: pkg.registry,
         verdict: "not_found",
         confidence: 0.95,
@@ -23957,6 +24040,7 @@ var PackageChecker = class {
     if (!metadata.requestedVersionFound && pkg.version) {
       return {
         packageName: pkg.name,
+        packageVersion: pkg.version,
         registry: pkg.registry,
         verdict: "not_found",
         confidence: 0.95,
@@ -23972,6 +24056,7 @@ var PackageChecker = class {
             const detections = fileResult.detectionNames.length > 0 ? fileResult.detectionNames.join(", ") : sev;
             return {
               packageName: pkg.name,
+              packageVersion: pkg.version,
               registry: pkg.registry,
               verdict: "malicious",
               confidence: 1,
@@ -23990,6 +24075,7 @@ var PackageChecker = class {
     if (ageDays !== void 0 && ageDays < SUSPICIOUS_AGE_DAYS) {
       return {
         packageName: pkg.name,
+        packageVersion: pkg.version,
         registry: pkg.registry,
         verdict: "suspicious_age",
         confidence: 0.6,
@@ -23999,6 +24085,7 @@ var PackageChecker = class {
     }
     return {
       packageName: pkg.name,
+      packageVersion: pkg.version,
       registry: pkg.registry,
       verdict: "clean",
       confidence: 1,
@@ -24434,6 +24521,8 @@ init_file_utils();
 init_types2();
 var REQUIRED_FIELDS = /* @__PURE__ */ new Set([
   "id",
+  "version",
+  "detection_name",
   "category",
   "severity",
   "confidence",
@@ -24441,6 +24530,37 @@ var REQUIRED_FIELDS = /* @__PURE__ */ new Set([
   "match_on",
   "title"
 ]);
+var MACRO_FILENAME = "_macros.yaml";
+var MAX_MACRO_PASSES = 5;
+var MACRO_REF = /\{\{([A-Z0-9_]+)\}\}/g;
+function expandMacros(pattern, macros) {
+  let expanded = pattern;
+  for (let pass = 0; pass <= MAX_MACRO_PASSES; pass++) {
+    if (!expanded.includes("{{"))
+      return expanded;
+    if (pass === MAX_MACRO_PASSES) {
+      throw new Error(`macro nesting exceeds ${MAX_MACRO_PASSES} passes`);
+    }
+    expanded = expanded.replace(MACRO_REF, (_match, name) => {
+      const value = macros[name];
+      if (value === void 0)
+        throw new Error(`undefined macro {{${name}}}`);
+      return value;
+    });
+  }
+  return expanded;
+}
+function readMacros(filename, data, logger2) {
+  const macros = {};
+  for (const [name, value] of Object.entries(data)) {
+    if (typeof value !== "string") {
+      logger2.warn(`Skipping macro ${name} in ${filename}: not a string`);
+      continue;
+    }
+    macros[name] = value;
+  }
+  return macros;
+}
 function parseExpiresAt(value) {
   if (value == null)
     return null;
@@ -24466,11 +24586,12 @@ async function loadThreats(threatDir, logger2 = nullLogger) {
     logger2.warn("Threat directory does not exist or is unreadable", { path: threatDir });
     return threats;
   }
+  const ruleFiles = [];
+  let macros = {};
   for (const filename of files) {
-    const filePath = (0, import_node_path15.join)(threatDir, filename);
     let content;
     try {
-      content = await getFileContent(filePath);
+      content = await getFileContent((0, import_node_path15.join)(threatDir, filename));
     } catch (e) {
       logger2.warn(`Failed to read ${filename}`, { error: String(e) });
       continue;
@@ -24482,10 +24603,21 @@ async function loadThreats(threatDir, logger2 = nullLogger) {
       logger2.warn(`Failed to parse ${filename}`, { error: String(e) });
       continue;
     }
+    if (filename === MACRO_FILENAME) {
+      if (typeof data !== "object" || data === null || Array.isArray(data)) {
+        logger2.warn(`Expected mapping in ${filename}, got ${Array.isArray(data) ? "list" : typeof data}`);
+        continue;
+      }
+      macros = readMacros(filename, data, logger2);
+      continue;
+    }
     if (!Array.isArray(data)) {
       logger2.warn(`Expected list in ${filename}, got ${typeof data}`);
       continue;
     }
+    ruleFiles.push({ filename, data });
+  }
+  for (const { filename, data } of ruleFiles) {
     for (const entry of data) {
       if (typeof entry !== "object" || entry === null) {
         logger2.warn(`Skipping non-object entry in ${filename}`);
@@ -24502,10 +24634,12 @@ async function loadThreats(threatDir, logger2 = nullLogger) {
         continue;
       if (isExpired(record2))
         continue;
+      let pattern;
       let compiledPattern;
       try {
+        pattern = expandMacros(record2.pattern, macros);
         const flags2 = record2.case_insensitive === true ? "i" : "";
-        compiledPattern = new RegExp(record2.pattern, flags2);
+        compiledPattern = new RegExp(pattern, flags2);
       } catch (e) {
         logger2.warn(`Skipping threat ${record2.id}: invalid regex pattern`, {
           error: String(e)
@@ -24523,13 +24657,28 @@ async function loadThreats(threatDir, logger2 = nullLogger) {
         });
         continue;
       }
+      const version2 = record2.version;
+      if (typeof version2 !== "number" || !Number.isInteger(version2) || version2 <= 0) {
+        logger2.warn(`Skipping threat ${record2.id}: invalid version`, {
+          version: version2
+        });
+        continue;
+      }
+      const detectionName = record2.detection_name;
+      if (typeof detectionName !== "string" || !isCanonicalDetectionName(detectionName)) {
+        logger2.warn(`Skipping threat ${record2.id}: invalid detection_name`, {
+          detectionName
+        });
+        continue;
+      }
       threats.push({
         id: record2.id,
-        version: typeof record2.version === "number" ? record2.version : void 0,
+        version: version2,
+        detectionName,
         category: record2.category,
         severity: record2.severity,
         confidence,
-        pattern: record2.pattern,
+        pattern,
         compiledPattern,
         matchOn,
         title: record2.title,
@@ -24547,6 +24696,29 @@ async function loadThreats(threatDir, logger2 = nullLogger) {
 init_types2();
 var AMSI_CONTENT_SNIPPET_MAX = 200;
 var AMSI_CONTENT_NAME_MAX = 256;
+var HEURISTIC_PI_CONTENT_SNIPPET_MAX = 200;
+function buildHeuristicSignal(match) {
+  return {
+    detection_name: formatReportingDetectionName(match.threat.detectionName, "heuristics", `${match.threat.id}:${match.threat.version}`),
+    rule_id: match.threat.id,
+    rule_version: match.threat.version
+  };
+}
+function resolvePiContentSnippet(piResults, heuristicMatches) {
+  let highestRiskResult;
+  for (const result of piResults) {
+    if (result.risk >= DEFAULT_PI_MEDIUM_RISK_THRESHOLD && result.contentSnippet && (!highestRiskResult || result.risk > highestRiskResult.risk)) {
+      highestRiskResult = result;
+    }
+  }
+  if (highestRiskResult?.contentSnippet)
+    return scrubHomePath(highestRiskResult.contentSnippet);
+  const heuristicMatch = heuristicMatches.find((match) => match.threat.category === "prompt_injection");
+  if (!heuristicMatch)
+    return void 0;
+  const snippet = safeTruncate(scrubHomePath(heuristicMatch.matchValue), HEURISTIC_PI_CONTENT_SNIPPET_MAX);
+  return snippet || void 0;
+}
 function scrubAmsiContentName(contentName) {
   const colon = contentName.indexOf(":");
   if (colon < 0)
@@ -24556,16 +24728,10 @@ function scrubAmsiContentName(contentName) {
   return `${head}${scrubHomePath(tail)}`;
 }
 function buildAmsiSignal(r) {
-  const detectionName = r.amsiResult >= 32768 ? "AMSI|DETECTED" : r.amsiResult >= 16384 ? "AMSI|BLOCKED_BY_ADMIN" : (
-    // Defensive: callers should filter these out via `isDetected || isBlockedByAdmin`,
-    // but if a non-detected/non-blocked result still reaches here we emit a
-    // meaningful label rather than silently dropping the entry.
-    "AMSI|UNKNOWN"
-  );
   const contentName = safeTruncate(scrubAmsiContentName(r.contentName), AMSI_CONTENT_NAME_MAX);
   const snippet = r.content ? safeTruncate(scrubHomePath(r.content), AMSI_CONTENT_SNIPPET_MAX) : "";
   return {
-    detection_name: detectionName,
+    detection_name: formatReportingDetectionName(amsiDetectionName(r.amsiResult), "amsi", amsiReportingData(r.amsiResult)),
     content_name: contentName,
     amsi_result: r.amsiResult,
     ...snippet ? { content_snippet: snippet } : {}
@@ -24637,7 +24803,7 @@ async function evaluateToolCall(request, context) {
         severity: "critical",
         source: "exception",
         artifacts: [denyMatch.artifact.value],
-        matchedThreatId: null,
+        matchedThreatId: denyMatch.rule.id,
         reasons: [
           `Deny exception: ${denyMatch.rule.match} pattern '${denyMatch.rule.pattern}'${denyMatch.rule.reason ? ` \u2014 ${denyMatch.rule.reason}` : ""}`
         ]
@@ -24807,6 +24973,12 @@ async function evaluateToolCall(request, context) {
               if (result) {
                 allPiResults.push(result);
               }
+            } else {
+              logger2.info("PI model inference skipped", {
+                context: `WebFetch:${url}`,
+                reason: "content_not_scannable",
+                contentType: fetched.contentType ?? "unknown"
+              });
             }
           }
         }
@@ -24852,24 +25024,9 @@ async function evaluateToolCall(request, context) {
     }
   }
   await cacheUrlResults(urlCheckResults, cache2);
-  function formatPackageDetectionName(p) {
-    const base = `PKG|${p.verdict}|registry=${p.registry}|name=${p.packageName}`;
-    if (p.verdict === "suspicious_age") {
-      const ageDays = typeof p.ageDays === "number" ? Math.floor(p.ageDays) : void 0;
-      return ageDays !== void 0 ? `${base}|age_days=${ageDays}` : base;
-    }
-    if (p.verdict === "malicious") {
-      const det = (p.fileDetectionNames ?? []).filter((d) => typeof d === "string" && d.length > 0);
-      return det.length > 0 ? `${base}|det=${det.join(",")}` : base;
-    }
-    return base;
-  }
   const auditSignals = {};
   if (heuristicMatches.length > 0) {
-    auditSignals.heuristics = heuristicMatches.map((m) => ({
-      rule_id: m.threat.id,
-      rule_version: typeof m.threat.version === "number" ? m.threat.version : void 0
-    }));
+    auditSignals.heuristics = heuristicMatches.map(buildHeuristicSignal);
   }
   if (urlCheckResults.length > 0) {
     const relevant = urlCheckResults.filter((r) => r.isMalicious);
@@ -24900,9 +25057,9 @@ async function evaluateToolCall(request, context) {
     const relevant = packageCheckResults.filter((p) => p.verdict !== "clean");
     if (relevant.length > 0) {
       auditSignals.package_checks = relevant.map((p) => ({
-        detection_name: formatPackageDetectionName(p),
+        detection_name: formatReportingDetectionName(packageDetectionName(p.verdict), "package", p.packageVersion ? `${p.packageName}:${p.packageVersion}` : p.packageName),
         package_name: p.packageName,
-        package_version: void 0,
+        package_version: p.packageVersion,
         package_registry: p.registry
       }));
     }
@@ -24917,6 +25074,7 @@ async function evaluateToolCall(request, context) {
   if (allPiResults.length > 0) {
     const piSnippetFloor = DEFAULT_PI_MEDIUM_RISK_THRESHOLD;
     auditSignals.pi_checks = allPiResults.map((r) => ({
+      detection_name: formatReportingDetectionName(PI_DETECTION_NAME, "ml", `${r.modelId}:${MODEL_SCHEMA_VERSION}`),
       risk: r.risk,
       model_id: r.modelId,
       content_name: r.contentName,
@@ -24930,6 +25088,7 @@ async function evaluateToolCall(request, context) {
     }
   }
   const resolvedSignals = Object.keys(auditSignals).length > 0 ? auditSignals : void 0;
+  const contentSnippet = resolvePiContentSnippet(allPiResults, heuristicMatches);
   const builtContent = buildContentSnapshot(request.toolName, request.toolInput, request.artifacts, auditSignals);
   const resolvedContent = Object.keys(builtContent).length > 0 ? builtContent : void 0;
   try {
@@ -24943,6 +25102,7 @@ async function evaluateToolCall(request, context) {
       hookType: request.hookType,
       signals: resolvedSignals,
       content: resolvedContent,
+      contentSnippet,
       eventId,
       toolUseId: request.toolUseId
     });
@@ -24958,6 +25118,7 @@ async function evaluateToolCall(request, context) {
         hookType: request.hookType,
         toolName: request.toolName,
         content: resolvedContent,
+        contentSnippet,
         signals: resolvedSignals,
         communityIqEnabled: config2.community_iq,
         config: config2,
@@ -25083,6 +25244,7 @@ async function checkPackages(request, config2, cache2, logger2) {
       }
       results.push({
         packageName: pkg.name,
+        packageVersion: pkg.version,
         registry: pkg.registry,
         verdict: rawVerdict,
         confidence: rawConf,
@@ -25185,8 +25347,7 @@ async function evaluateToolOutput(request, context) {
     return warnings;
   }
   const config2 = await resolveEvaluationConfig(context, logger2);
-  let heuristicMatchId;
-  let heuristicMatchVersion;
+  let heuristicMatch;
   try {
     if (config2.heuristics_enabled) {
       let threats = await loadThreats(context.threatsDir);
@@ -25203,8 +25364,7 @@ async function evaluateToolOutput(request, context) {
       const matches = engine.match(artifacts);
       const top = matches[0];
       if (top) {
-        heuristicMatchId = top.threat.id;
-        heuristicMatchVersion = typeof top.threat.version === "number" ? top.threat.version : void 0;
+        heuristicMatch = top;
         warnings.push({
           source: "heuristic",
           message: formatOutputWarning(request.toolName, `${top.threat.title} (${top.threat.id})`)
@@ -25216,12 +25376,11 @@ async function evaluateToolOutput(request, context) {
   }
   if (warnings.length > 0) {
     const auditSignals = {};
-    if (heuristicMatchId) {
-      auditSignals.heuristics = [
-        { rule_id: heuristicMatchId, rule_version: heuristicMatchVersion }
-      ];
+    if (heuristicMatch) {
+      auditSignals.heuristics = [buildHeuristicSignal(heuristicMatch)];
     }
     const resolvedSignals = Object.keys(auditSignals).length > 0 ? auditSignals : void 0;
+    const contentSnippet = resolvePiContentSnippet([], heuristicMatch ? [heuristicMatch] : []);
     const builtContent = buildContentSnapshot(request.toolName, request.toolInput);
     const resolvedContent = Object.keys(builtContent).length > 0 ? builtContent : void 0;
     try {
@@ -25232,7 +25391,7 @@ async function evaluateToolOutput(request, context) {
         severity: "critical",
         source: "heuristic",
         artifacts: [],
-        matchedThreatId: heuristicMatchId ?? "PROMPT_INJECTION",
+        matchedThreatId: heuristicMatch?.threat.id ?? "PROMPT_INJECTION",
         reasons: ["Prompt injection detected in tool output"]
       };
       await logVerdict(config2.logging, {
@@ -25245,6 +25404,7 @@ async function evaluateToolOutput(request, context) {
         hookType: request.hookType ?? "PostToolUse",
         signals: resolvedSignals,
         content: resolvedContent,
+        contentSnippet,
         eventId,
         toolUseId: request.toolUseId
       });
@@ -25259,6 +25419,7 @@ async function evaluateToolOutput(request, context) {
         hookType: request.hookType ?? "PostToolUse",
         toolName: request.toolName,
         content: resolvedContent,
+        contentSnippet,
         signals: resolvedSignals,
         communityIqEnabled: config2.community_iq,
         config: config2,
@@ -25311,6 +25472,19 @@ function kv(key, value) {
 }
 function separatorLine(headerLength) {
   return "\u2501".repeat(headerLength);
+}
+function ruleLabel(verdict) {
+  if (!verdict.matchedThreatId)
+    return null;
+  return verdict.source === "exception" ? `${verdict.matchedThreatId} (your exception rule)` : verdict.matchedThreatId;
+}
+function remediationHint(verdict) {
+  if (verdict.source === "exception") {
+    const id = verdict.matchedThreatId ? ` (id ${verdict.matchedThreatId})` : "";
+    return `This block comes from your own rule in ~/.sage/exceptions.json${id} \u2014 edit or remove it there.`;
+  }
+  const rule = verdict.matchedThreatId ? ` (rule ${verdict.matchedThreatId})` : "";
+  return `If this is a false positive, use the sage_report_false_positive MCP tool to report it${rule}.`;
 }
 function formatPiWarning(warning, branding = defaultBranding) {
   const lines = [
@@ -35609,6 +35783,9 @@ function readContent(entry) {
     return {};
   return raw;
 }
+function readContentSnippet(entry) {
+  return asString2(entry.content_snippet);
+}
 function isRuntimeVerdictEntry(v) {
   if (!v || typeof v !== "object" || Array.isArray(v))
     return false;
@@ -35654,9 +35831,10 @@ var ReportInputSchema = external_exports.object({
   entry_ids: external_exports.array(external_exports.string()).optional().describe(`REQUIRED in normal use: list of specific audit entry_ids to report as false positives. ALWAYS call sage_list_audit_entries first to inspect the audit log and identify the exact deny/ask verdict the user considers a false positive, then pass its entry_id here. Up to ${MAX_EXPLICIT_ENTRIES} entry_ids may be provided per call. Omitting this parameter is a fallback that submits up to ${MAX_IMPLICIT_ENTRIES} most recent deny/ask entries for the conversation, which may include irrelevant verdicts and should only be used when entry_id discovery is impossible.`),
   dry_run: external_exports.boolean().optional().describe("If true, do not POST; just show the payload.")
 });
-function parseAuditSignals(raw) {
+function parseAuditSignals(raw, options = {}) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw))
     return {};
+  const includePiContentSnippet = options.includePiContentSnippet ?? true;
   const obj = raw;
   const heuristicsRaw = obj.heuristics;
   const urlChecksRaw = obj.url_checks;
@@ -35668,11 +35846,16 @@ function parseAuditSignals(raw) {
     if (!h || typeof h !== "object" || Array.isArray(h))
       return null;
     const rec = h;
+    const detection_name = asString2(rec.detection_name);
     const rule_id = asString2(rec.rule_id);
     const rule_version = typeof rec.rule_version === "number" ? Math.trunc(rec.rule_version) : void 0;
     if (!rule_id)
       return null;
-    return { rule_id, rule_version };
+    return {
+      ...detection_name ? { detection_name } : {},
+      rule_id,
+      rule_version
+    };
   }).filter(Boolean) : void 0;
   const url_checks = Array.isArray(urlChecksRaw) ? urlChecksRaw.map((u) => {
     if (!u || typeof u !== "object" || Array.isArray(u))
@@ -35710,12 +35893,20 @@ function parseAuditSignals(raw) {
     if (!m || typeof m !== "object" || Array.isArray(m))
       return null;
     const rec = m;
+    const detection_name = asString2(rec.detection_name);
     const risk = typeof rec.risk === "number" ? rec.risk : void 0;
     const model_id = asString2(rec.model_id);
     const content_name = asString2(rec.content_name);
+    const content_snippet = asString2(rec.content_snippet);
     if (risk === void 0 || !model_id || !content_name)
       return null;
-    return { risk, model_id, content_name };
+    return {
+      ...detection_name ? { detection_name } : {},
+      risk,
+      model_id,
+      content_name,
+      ...content_snippet && includePiContentSnippet ? { content_snippet } : {}
+    };
   }).filter(Boolean) : void 0;
   const amsi_checks = Array.isArray(amsiChecksRaw) ? amsiChecksRaw.map((a) => {
     if (!a || typeof a !== "object" || Array.isArray(a))
@@ -35787,7 +35978,11 @@ function registerFalsePositiveTools(server, opts) {
         severity: asString2(e.severity),
         source: asString2(e.source),
         user_override: e.user_override,
-        signals: parseAuditSignals(e.signals),
+        // PI snippets are untrusted fetched content. Exclude their raw
+        // text—including the generic top-level content_snippet - from this
+        // model-visible response. Retain it only for the backend-only
+        // false-positive report below.
+        signals: parseAuditSignals(e.signals, { includePiContentSnippet: false }),
         content: readContent(e)
       }));
       complete2("completed", {
@@ -35904,10 +36099,14 @@ ${reasoning}`;
         const agent_runtime = asString2(e.agent_runtime) ?? "unknown";
         const tool_type = asString2(e.tool_name) ?? "Unknown";
         const verdict = asString2(e.verdict) ?? "deny";
-        const user_action = e.user_override === true ? "allowed" : "blocked";
+        const wasAllowed = verdict === "allow" || e.user_override === true;
+        const user_action = wasAllowed ? "allowed" : "blocked";
         const hook_type = asHookType(e.hook_type) ?? "PreToolUse";
-        const signals = parseAuditSignals(e.signals);
+        const signals = parseAuditSignals(e.signals, {
+          includePiContentSnippet: !dry_run
+        });
         const content = readContent(e);
+        const contentSnippet = readContentSnippet(e);
         const bestEffortSignals = {};
         if (signals.heuristics)
           bestEffortSignals.heuristics = signals.heuristics;
@@ -35936,7 +36135,8 @@ ${reasoning}`;
             user_action,
             timestamp,
             ...Object.keys(bestEffortSignals).length > 0 ? { signals: bestEffortSignals } : {},
-            content
+            content,
+            ...contentSnippet && !dry_run ? { content_snippet: contentSnippet } : {}
           },
           comment,
           event_id: entry_id ?? (0, import_node_crypto6.randomUUID)()
@@ -36137,6 +36337,8 @@ function artifactTypeLabel(type) {
   return type;
 }
 function appendVerdictDetails(lines, verdict) {
+  const rule = ruleLabel(verdict);
+  if (rule) lines.push(kv("Rule", rule));
   lines.push(kv("Severity", verdict.severity.toUpperCase()));
   if (verdict.artifacts.length > 0) {
     lines.push(kv("Artifact", verdict.artifacts[0]));
@@ -36163,9 +36365,7 @@ function formatBlockReason(verdict, branding = defaultBranding) {
       lines2.push("Do NOT attempt to fetch this URL again or access it through alternative tools.");
     }
     lines2.push("");
-    lines2.push(
-      "If this is a false positive, use the sage_report_false_positive MCP tool to report it."
-    );
+    lines2.push(remediationHint(verdict));
     return lines2.join("\n");
   }
   const header = `\u{1F6E1}\uFE0F ${branding.name}: Suspicious Activity Detected`;
@@ -36794,7 +36994,7 @@ async function main() {
   const shutdown = registerProcessShutdown();
   const branding = resolveBranding(config2.brand_key, logger);
   const server = createSageMcpServer({
-    version: "0.12.0",
+    version: "0.13.0",
     logger,
     branding
   });
@@ -36816,7 +37016,7 @@ async function main() {
   await server.connect(transport);
   logger.debug("MCP server connected", {
     serverName: branding.name.toLowerCase(),
-    version: "0.12.0"
+    version: "0.13.0"
   });
 }
 main().catch(async (e) => {

@@ -96,6 +96,23 @@ export {
 	safeTruncate,
 	scrubHomePath,
 } from "./content-snapshot.js";
+// Canonical Sage-owned detection names
+export {
+	AMSI_DETECTION_NAMES,
+	AMSI_REPORTING_RULE_NAMES,
+	type AmsiDetectionClass,
+	amsiDetectionName,
+	amsiReportingData,
+	formatReportingDetectionName,
+	isCanonicalDetectionName,
+	PACKAGE_DETECTION_NAMES,
+	type PackageDetectionVerdict,
+	PI_DETECTION_NAME,
+	packageDetectionName,
+	REPORTING_DETECTION_SUFFIX,
+	REPORTING_ENGINE_SHORTHANDS,
+	type ReportingDetectionEngine,
+} from "./detection-names.js";
 // Detection telemetry (Community IQ)
 export {
 	type CommunityIqTelemetryArgs,
@@ -183,6 +200,8 @@ export {
 	formatUpdateNotice,
 	kv,
 	PAD,
+	remediationHint,
+	ruleLabel,
 	SEPARATOR_WIDTH,
 	separatorLine,
 	severityEmoji,

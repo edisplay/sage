@@ -32,6 +32,7 @@ export interface VerdictLogEntry {
 	hookType?: HookType;
 	signals?: AuditSignals;
 	content?: Record<string, unknown>;
+	contentSnippet?: string;
 	eventId?: string;
 	toolUseId?: string;
 }
@@ -106,6 +107,7 @@ export async function logVerdict(config: LoggingConfig, input: VerdictLogEntry):
 		severity: input.verdict.severity,
 		reasons: input.verdict.reasons,
 		source: input.verdict.source,
+		threat_id: input.verdict.matchedThreatId,
 		user_override: userOverride,
 		signals: input.signals,
 		tool_use_id: input.toolUseId,
@@ -115,6 +117,9 @@ export async function logVerdict(config: LoggingConfig, input: VerdictLogEntry):
 	// extract" entries indistinguishable on disk.
 	if (input.content !== undefined) {
 		entry.content = input.content;
+	}
+	if (input.contentSnippet !== undefined) {
+		entry.content_snippet = input.contentSnippet;
 	}
 
 	try {
@@ -197,7 +202,7 @@ export async function logSkillQueued(
 export async function logSkillVerdict(
 	config: LoggingConfig,
 	skillId: string,
-	status: "analyzed" | "too_large" | "error" | "no_verdict",
+	status: "analyzed" | "too_large" | "empty" | "error" | "no_verdict",
 	verdict?: string,
 	summary?: string,
 ): Promise<void> {

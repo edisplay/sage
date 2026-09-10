@@ -34,6 +34,16 @@ describe("Self-defense threats", () => {
 		expect(ids.filter((id) => id === "CLT-SELF-001")).toEqual([]);
 	});
 
+	it("does not match a prose warning against deleting .sage (SELF-001 FP)", () => {
+		const ids = matchCommand(engine, 'echo "never rm the .sage directory, it holds config"');
+		expect(ids.filter((id) => id === "CLT-SELF-001")).toEqual([]);
+	});
+
+	it("does not match a grep mentioning the deletion (SELF-001 FP)", () => {
+		const ids = matchCommand(engine, 'grep -rn "rm -rf .sage" docs/');
+		expect(ids.filter((id) => id === "CLT-SELF-001")).toEqual([]);
+	});
+
 	// --- Write to Sage config files (SELF-002) ---
 
 	it("detects write to .sage/config.json (SELF-002)", () => {
@@ -59,6 +69,14 @@ describe("Self-defense threats", () => {
 
 	it("does not match reading .claude files (SELF-003)", () => {
 		const ids = matchCommand(engine, "cat /home/user/.claude/hooks.json");
+		expect(ids.filter((id) => id === "CLT-SELF-003")).toEqual([]);
+	});
+
+	it("does not match a prose warning against deleting hooks.json (SELF-003 FP)", () => {
+		const ids = matchCommand(
+			engine,
+			'echo "do not rm .claude/hooks.json, it will break Claude Code"',
+		);
 		expect(ids.filter((id) => id === "CLT-SELF-003")).toEqual([]);
 	});
 

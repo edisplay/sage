@@ -6,7 +6,7 @@ import { ConfigSchema, nullLogger } from "./types.js";
 
 export const CONFIG_DEFAULTS_FILENAME = "config.default.json";
 /** Bump whenever the serialized defaults shape or values change. */
-export const CONFIG_DEFAULTS_SCHEMA_VERSION = 1;
+export const CONFIG_DEFAULTS_SCHEMA_VERSION = 2;
 
 export type ConfigDefaults = Config & { schema_version: number };
 

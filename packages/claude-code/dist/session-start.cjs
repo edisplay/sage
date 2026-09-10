@@ -4316,7 +4316,8 @@ var init_types2 = __esm({
     VerdictSeveritySchema = external_exports.enum(["info", "warning", "critical"]);
     ThreatSchema = external_exports.object({
       id: external_exports.string(),
-      version: external_exports.number().int().optional(),
+      version: external_exports.number().int().positive(),
+      detectionName: external_exports.string(),
       category: external_exports.string(),
       severity: VerdictSeveritySchema,
       confidence: external_exports.number(),
@@ -4415,6 +4416,7 @@ var init_types2 = __esm({
       sensitivity: SensitivitySchema.default("balanced"),
       disabled_threats: external_exports.array(external_exports.string()).default([]),
       announce_clean_scans: external_exports.boolean().default(true),
+      manage_status_line: external_exports.boolean().default(true),
       brand_key: external_exports.string().min(1).max(32).regex(/^[a-z0-9_-]+$/u).optional(),
       community_iq: external_exports.boolean().default(true)
     });
@@ -14603,7 +14605,7 @@ init_file_utils();
 var import_meta = {};
 function resolveVersion() {
   if (true)
-    return "0.12.0";
+    return "0.13.0";
   try {
     const pkgPath = (0, import_node_path5.join)((0, import_node_path5.dirname)((0, import_node_url.fileURLToPath)(import_meta.url)), "..", "package.json");
     const pkg = JSON.parse(getFileContentSync(pkgPath));
@@ -15074,7 +15076,7 @@ var import_node_path7 = require("node:path");
 init_file_utils();
 init_types2();
 var CONFIG_DEFAULTS_FILENAME = "config.default.json";
-var CONFIG_DEFAULTS_SCHEMA_VERSION = 1;
+var CONFIG_DEFAULTS_SCHEMA_VERSION = 2;
 function buildConfigDefaults() {
   return {
     schema_version: CONFIG_DEFAULTS_SCHEMA_VERSION,
@@ -16419,6 +16421,10 @@ async function computeSkillIdsForRoot(rootDir, logger2) {
   for (const folder of folders) {
     try {
       const entries = await entriesFromDirectory(folder, MAX_SKILL_BYTES);
+      if (entries.length === 0) {
+        logger2?.warn("Skill enumerates to no entries; not analyzable, skipping", { folder });
+        continue;
+      }
       const { skillId } = computeSkillId(entries);
       out.push({ folder, skillId });
     } catch (e) {
@@ -17787,9 +17793,11 @@ async function main() {
   } catch {
   }
   let statusLineHint = null;
-  try {
-    statusLineHint = await configureStatusLine(pluginRoot, branding);
-  } catch {
+  if (config.manage_status_line) {
+    try {
+      statusLineHint = await configureStatusLine(pluginRoot, branding);
+    } catch {
+    }
   }
   const allowlistMigration = await checkAllowlistMigration();
   const parts = [];

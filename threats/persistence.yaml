@@ -4,10 +4,16 @@
 
 # --- Shell RC file modification ---
 - id: "CLT-PERSIST-001"
+  version: 1
+  detection_name: "CMD:SagePersistence-A [Heur]"
   category: tool
   severity: warning
   confidence: 0.60
-  pattern: "(>>|>)\\s*~?/?(\\$HOME/)?\\.?(bashrc|zshrc|profile|bash_profile|zprofile|zshenv)"
+  # Exact dotfile basename required; an unbounded alternation matched `profile`
+  # as a prefix of longer names (`cat > profile.py`). The directory prefix is
+  # scoped to home forms so unrelated locations (`/tmp/.profile`,
+  # `./fixtures/.bashrc`) are not startup files and do not match.
+  pattern: "(?:>>|>)\\s*(?:(?:~|\\$HOME|/home/[^/\\s]+|/Users/[^/\\s]+)/)?\\.(?:bashrc|zshrc|zprofile|zshenv|bash_profile|profile)(?![\\w.-])"
   match_on: command
   title: "Write/append to shell RC file (persistence mechanism)"
   expires_at: null
@@ -15,10 +21,13 @@
 
 # --- Crontab manipulation ---
 - id: "CLT-PERSIST-002"
+  version: 1
+  detection_name: "CMD:SagePersistence-B [Heur]"
   category: tool
   severity: warning
   confidence: 0.60
-  pattern: "\\bcrontab\\s+(-[er]|[^-])"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-CMD-009.
+  pattern: "{{CMD_POS}}crontab{{NOT_FILENAME}}\\s+(-[er]|[^-])"
   match_on: command
   title: "Crontab manipulation (list, edit, or remove scheduled tasks)"
   expires_at: null
@@ -26,6 +35,8 @@
 
 # --- Cron directory writes ---
 - id: "CLT-PERSIST-003"
+  version: 1
+  detection_name: "CMD:SagePersistence-C [Heur]"
   category: tool
   severity: warning
   confidence: 0.60
@@ -37,10 +48,15 @@
 
 # --- systemd service manipulation ---
 - id: "CLT-PERSIST-005"
+  version: 1
+  detection_name: "CMD:SagePersistence-E [Heur]"
   category: tool
   severity: warning
   confidence: 0.60
-  pattern: "\\bsystemctl\\s+(enable|start)\\b|/etc/systemd/system/"
+  # {{CMD_POS}} + {{NOT_FILENAME}} on the systemctl branch, same shape as
+  # CLT-CMD-009. The path-literal branch is left as-is -- it's a path
+  # mention, not a "program executing" check.
+  pattern: "{{CMD_POS}}systemctl{{NOT_FILENAME}}\\s+(enable|start)\\b|/etc/systemd/system/"
   match_on: command
   title: "systemd service enable/start or unit file write"
   expires_at: null
@@ -48,6 +64,8 @@
 
 # --- SSH authorized_keys modification ---
 - id: "CLT-PERSIST-006"
+  version: 1
+  detection_name: "CMD:SagePersistence-F [Heur]"
   category: tool
   severity: critical
   confidence: 0.95
@@ -59,10 +77,22 @@
 
 # --- Echo/printf append to shell RC files ---
 - id: "CLT-PERSIST-007"
+  version: 1
+  detection_name: "CMD:SagePersistence-G [Heur]"
   category: tool
   severity: critical
   confidence: 0.90
-  pattern: "(echo|printf)\\s+.*>>\\s*~?/?(\\$HOME/)?\\.?(bashrc|zshrc|profile|bash_profile)"
+  # Deliberately narrower than CLT-PERSIST-001: this rule got the dot
+  # requirement and the trailing boundary, but not 001's home-directory path
+  # prefix. Widening it was out of scope for the false-positive fix that added
+  # that prefix, because confidence 0.90 denies at default sensitivity where
+  # 001's 0.60 only asks. Consequence: `>> /home/user/.bashrc` is matched by 001
+  # and not here. Unify only with intent.
+  #
+  # {{CMD_POS}} + {{NOT_FILENAME}} added separately: the verb alternation had
+  # no boundary at all, so `myecho evil >> ~/.bashrc` matched "echo" as a bare
+  # substring of "myecho".
+  pattern: "{{CMD_POS}}(echo|printf){{NOT_FILENAME}}\\s+.*>>\\s*~?/?(\\$HOME/)?\\.(bashrc|zshrc|profile|bash_profile)(?![\\w.-])"
   match_on: command
   title: "Echo/printf append to shell RC file (code injection persistence)"
   expires_at: null
@@ -70,10 +100,15 @@
 
 # --- at job scheduling ---
 - id: "CLT-PERSIST-008"
+  version: 1
+  detection_name: "CMD:SagePersistence-H [Heur]"
   category: tool
   severity: warning
   confidence: 0.60
-  pattern: "\\bat\\b\\s+(-f\\s+|now|midnight|noon|teatime)"
+  # {{CMD_POS}} + {{NOT_FILENAME}}, same shape as CLT-CMD-009. The bare `\bat\b`
+  # boundary let a two-letter word match inside quoted prose or a search
+  # command (`grep -rn "at now" schedule.log`).
+  pattern: "{{CMD_POS}}at{{NOT_FILENAME}}\\s+(-f\\s+|now|midnight|noon|teatime)"
   match_on: command
   title: "At-job scheduling (persistence)"
   expires_at: null

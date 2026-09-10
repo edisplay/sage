@@ -133,5 +133,28 @@ describe("macOS persistence threats", () => {
 		expect(ids.filter((id) => id === "CLT-MAC-PERSIST-003")).toEqual([]);
 	});
 
+	it("does not match a quoted mention of osascript login item (002 FP)", () => {
+		const ids = matchCommand(engine, 'echo "osascript ... login item is a classic technique"');
+		expect(ids).not.toContain("CLT-MAC-PERSIST-002");
+	});
+
+	it("does not match a quoted mention of defaults write loginwindow (003 FP)", () => {
+		const ids = matchCommand(
+			engine,
+			'echo "defaults write com.apple.loginwindow LoginHook is a technique"',
+		);
+		expect(ids).not.toContain("CLT-MAC-PERSIST-003");
+	});
+
+	it("does not match a quoted mention of osascript folder action (008 FP)", () => {
+		const ids = matchCommand(engine, 'echo "osascript ... folder action is a classic technique"');
+		expect(ids).not.toContain("CLT-MAC-PERSIST-008");
+	});
+
+	it("does not match a quoted mention of launchctl load (009 FP)", () => {
+		const ids = matchCommand(engine, 'echo "launchctl load is a classic technique"');
+		expect(ids).not.toContain("CLT-MAC-PERSIST-009");
+	});
+
 	// at -l negative case moved to persistence-threats.test.ts
 });

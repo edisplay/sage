@@ -51,4 +51,9 @@ describe("supply chain threats", () => {
 		const ids = matchCommand(engine, "wget https://example.com/install.tar.gz");
 		expect(ids).not.toContain("CLT-SUPPLY-001");
 	});
+
+	it("does not match a prose mention of the technique (001 FP)", () => {
+		const ids = matchCommand(engine, 'echo "an install script piped to bash via curl is risky"');
+		expect(ids).not.toContain("CLT-SUPPLY-001");
+	});
 });

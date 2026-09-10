@@ -1,5 +1,13 @@
 # @gendigital/sage-claude-code
 
+## 0.13.0
+
+### Minor Changes
+
+- Add a `manage_status_line` setting for disabling Sage's status-line management and its related startup hint.
+
+- Show triggering rule IDs in detection banners and false-positive guidance, with tailored guidance for user-defined exception rules.
+
 ## 0.12.0
 
 ### Minor Changes

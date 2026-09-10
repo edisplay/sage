@@ -53,7 +53,8 @@ export type VerdictSeverity = z.infer<typeof VerdictSeveritySchema>;
 
 export const ThreatSchema = z.object({
 	id: z.string(),
-	version: z.number().int().optional(),
+	version: z.number().int().positive(),
+	detectionName: z.string(),
 	category: z.string(),
 	severity: VerdictSeveritySchema,
 	confidence: z.number(),
@@ -65,13 +66,14 @@ export const ThreatSchema = z.object({
 	flags: z.array(z.string()).optional().default([]),
 });
 
-/** Raw threat from YAML (before compilation). */
+/** Uncompiled threat represented with code-facing field names. */
 export type ThreatData = z.infer<typeof ThreatSchema>;
 
 /** Loaded threat with compiled regex and normalized match_on. */
 export interface Threat {
 	id: string;
-	version?: number;
+	version: number;
+	detectionName: string;
 	category: string;
 	severity: VerdictSeverity;
 	confidence: number;
@@ -129,6 +131,8 @@ export interface Verdict {
 
 export interface PackageCheckResult {
 	packageName: string;
+	/** Version parsed from the tool input, when one was specified. */
+	packageVersion?: string;
 	registry: "npm" | "pypi";
 	verdict: "clean" | "not_found" | "suspicious_age" | "malicious" | "unknown";
 	confidence: number;
@@ -182,10 +186,18 @@ export interface SignalSources {
 
 // ── Audit signal metadata (for FP reporting) ────────────────────────
 
+/**
+ * Signal names stored here use the reporting form
+ * `<canonical name>|<engine shorthand>:<optional data>|sage`. These signals are
+ * persisted in the audit log and forwarded unchanged to detection telemetry
+ * and false-positive reports. Verdict reasons and other user-facing fields
+ * continue to use canonical names or human-readable titles.
+ */
 export interface AuditSignals {
 	heuristics?: {
+		detection_name: string;
 		rule_id: string;
-		rule_version?: number;
+		rule_version: number;
 	}[];
 	url_checks?: {
 		detection_name: string;
@@ -202,6 +214,7 @@ export interface AuditSignals {
 		package_registry: string;
 	}[];
 	pi_checks?: {
+		detection_name: string;
 		risk: number;
 		model_id: string;
 		content_name: string;
@@ -210,9 +223,15 @@ export interface AuditSignals {
 	/**
 	 * AMSI scan results. Win32 AMSI returns only a numeric threat level, not a
 	 * named detection — so `detection_name` is synthesized from the result code:
-	 *   - `"AMSI|DETECTED"`        for `amsi_result >= 0x8000`
-	 *   - `"AMSI|BLOCKED_BY_ADMIN"` for `0x4000 <= amsi_result < 0x8000`
-	 * (Same convention as `package_checks` synthesizing `"PKG|malicious|..."`.)
+	 *   - `"Other:SageAmsiDetected-A [Heur]|sgam:AMSI_DETECTED:8000|sage"`
+	 *     for `amsi_result === 0x8000`
+	 *   - `"Other:SageAmsiBlockedByAdmin-A [Heur]|sgam:AMSI_BLOCKED_BY_ADMIN:4000|sage"` for
+	 *     `amsi_result === 0x4000`
+	 *
+	 * The metadata segment is `sgam:<AMSI rule name>:<amsi_result>`, with the
+	 * result formatted as lowercase hexadecimal without a `0x` prefix. The class
+	 * follows these ranges: detected for `amsi_result >= 0x8000`, blocked by
+	 * admin for `0x4000 <= amsi_result < 0x8000`.
 	 *
 	 * `content_name` identifies what was scanned (e.g. `"Bash:command"`,
 	 * `"Write:/path/to/file"`). Home directories are scrubbed by the signal
@@ -407,6 +426,7 @@ export const ConfigSchema = z.object({
 	sensitivity: SensitivitySchema.default("balanced"),
 	disabled_threats: z.array(z.string()).default([]),
 	announce_clean_scans: z.boolean().default(true),
+	manage_status_line: z.boolean().default(true),
 	brand_key: z
 		.string()
 		.min(1)

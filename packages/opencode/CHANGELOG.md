@@ -1,5 +1,17 @@
 # @gendigital/sage-opencode
 
+## 0.13.0
+
+### Minor Changes
+
+- Show triggering rule IDs in deny messages and false-positive guidance, with tailored guidance for user-defined exception rules.
+
+### Patch Changes
+
+- Updated dependencies:
+  - Updated dependency `@gendigital/sage-core` to `0.13.0`
+  - Updated dependency `@gendigital/sage-mcp` to `0.13.0`
+
 ## 0.12.0
 
 ### Minor Changes

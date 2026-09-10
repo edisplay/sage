@@ -46,6 +46,8 @@ export interface CommunityIqTelemetryArgs {
 	 * the field, matching the historical schema shape.
 	 */
 	content?: Record<string, unknown>;
+	/** Generic evidence excerpt for a detection, when one is available. */
+	contentSnippet?: string;
 	signals?: AuditSignals;
 	communityIqEnabled: boolean;
 	config?: SageUserConfigInput;
@@ -105,6 +107,7 @@ export async function sendCommunityIqTelemetry(args: CommunityIqTelemetryArgs): 
 			timestamp: new Date().toISOString(),
 			...(args.signals && Object.keys(args.signals).length > 0 ? { signals: args.signals } : {}),
 			content: args.content ?? {},
+			...(args.contentSnippet ? { content_snippet: args.contentSnippet } : {}),
 		},
 		event_id: args.eventId,
 		comment: "",

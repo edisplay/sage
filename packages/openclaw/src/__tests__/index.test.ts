@@ -31,7 +31,7 @@ vi.mock("../bundled-dirs.js", () => ({
 }));
 
 vi.mock("../startup-scan.js", () => ({
-	createBeforeAgentStartHandler: vi.fn(
+	createPromptContextHandler: vi.fn(
 		(getSecurityFindings: () => string | null, clearFindings: () => void) =>
 			(notices: string | null) => {
 				const findings = getSecurityFindings();
@@ -77,6 +77,16 @@ function createMockApi() {
 }
 
 describe("OpenClaw plugin registration", () => {
+	it("surfaces context via before_prompt_build, not the removed before_agent_start hook", () => {
+		const { api, handlers } = createMockApi();
+		plugin.register(api);
+
+		// before_agent_start was removed from OpenClaw (2026.9.x); registering it
+		// makes the ClawHub Plugin Inspector reject the package (unknown-hook-name).
+		expect(handlers.has("before_agent_start")).toBe(false);
+		expect(handlers.has("before_prompt_build")).toBe(true);
+	});
+
 	it("keeps configuration warnings while replacing stale scan findings", async () => {
 		const { api, handlers } = createMockApi();
 		plugin.register(api);
@@ -84,10 +94,10 @@ describe("OpenClaw plugin registration", () => {
 		handlers.get("gateway_start")?.();
 		handlers.get("session_start")?.();
 
-		const result = await handlers.get("before_agent_start")?.();
+		const result = await handlers.get("before_prompt_build")?.();
 		expect(result).toEqual({ prependContext: "config warnings\n\nsession scan" });
 
-		const secondResult = await handlers.get("before_agent_start")?.();
+		const secondResult = await handlers.get("before_prompt_build")?.();
 		expect(secondResult).toBeUndefined();
 	});
 });

@@ -1,7 +1,7 @@
 /**
  * Sage OpenClaw plugin entry point.
  * Registers before_tool_call handler, startup/session scan hooks,
- * and before_agent_start handler.
+ * and before_prompt_build handler.
  */
 
 import {
@@ -18,7 +18,7 @@ import {
 } from "@gendigital/sage-core";
 import { getBundledDataDirs } from "./bundled-dirs.js";
 import {
-	createBeforeAgentStartHandler,
+	createPromptContextHandler,
 	createSessionScanHandler,
 	createStartupScanHandler,
 } from "./startup-scan.js";
@@ -58,8 +58,8 @@ export default {
 		let pendingConfigurationWarnings =
 			formatConfigurationWarnings(getConfigurationWarningsSync(undefined, logger), branding) ??
 			null;
-		// Store the promise so before_agent_start can await it — avoids a race where
-		// before_agent_start fires before the file read completes and the notice is lost.
+		// Store the promise so before_prompt_build can await it — avoids a race where
+		// before_prompt_build fires before the file read completes and the notice is lost.
 		const migrationCheckPromise = checkAllowlistMigration()
 			.then((result) => {
 				if (result.needed) {
@@ -80,7 +80,7 @@ export default {
 		const getPendingSecurityFindings = () =>
 			[pendingConfigurationWarnings, pendingScanFindings].filter(Boolean).join("\n\n") || null;
 
-		const beforeAgentStartHandler = createBeforeAgentStartHandler(
+		const promptContextHandler = createPromptContextHandler(
 			getPendingSecurityFindings,
 			() => {
 				pendingConfigurationWarnings = null;
@@ -92,7 +92,7 @@ export default {
 
 		// Resolve one-time notices from disk at delivery time. The scan
 		// (gateway_start/session_start) runs in a different process/turn and its
-		// in-memory hand-off never reaches before_agent_start, so we read
+		// in-memory hand-off never reaches before_prompt_build, so we read
 		// install-state.json here and commit each notice's "shown" flag exactly
 		// when it is handed to the user. Idempotent: only the first turn per
 		// install returns anything.
@@ -127,10 +127,13 @@ export default {
 			"session_start",
 			createSessionScanHandler(scanLogger, branding, onFindings, config.announce_clean_scans),
 		);
-		api.on("before_agent_start", async () => {
+		// before_prompt_build replaces the legacy before_agent_start hook, which
+		// OpenClaw removed in 2026.9.x (ClawHub's Plugin Inspector rejects packages
+		// that still register it). Both return the same `prependContext` shape.
+		api.on("before_prompt_build", async () => {
 			await migrationCheckPromise;
 			const notices = await resolveNoticeText();
-			return beforeAgentStartHandler(notices);
+			return promptContextHandler(notices);
 		});
 	},
 };

@@ -1,5 +1,11 @@
 # @gendigital/sage-openclaw
 
+## 0.13.1
+
+### Patch Changes
+
+- Surface scan findings and one-time notices via `before_prompt_build` instead of the legacy `before_agent_start` hook, which OpenClaw removed in 2026.9.x. Registering the removed hook made ClawHub's Plugin Inspector reject the package (`unknown-hook-name`), so v0.13.0 never reached ClawHub.
+
 ## 0.13.0
 
 ### Minor Changes

@@ -543,7 +543,7 @@ Boolean, default `true`. When `false`, Sage suppresses the "🛡️ &lt;brand&gt
 
 Why you might want this:
 
-- The clean banner is delivered through the agent's context surface (OpenClaw `before_agent_start` prependContext, OpenCode `<system-reminder>`, Claude Code `systemMessage`, Cursor/VS Code toast). On OpenClaw and OpenCode it also carries an "Inform the user about these security findings." line so the agent surfaces it in chat. Stricter models can mistake that pattern for a prompt-injection attempt on every clean session.
+- The clean banner is delivered through the agent's context surface (OpenClaw `before_prompt_build` prependContext, OpenCode `<system-reminder>`, Claude Code `systemMessage`, Cursor/VS Code toast). On OpenClaw and OpenCode it also carries an "Inform the user about these security findings." line so the agent surfaces it in chat. Stricter models can mistake that pattern for a prompt-injection attempt on every clean session.
 - Operators that already trust their plugin set don't need a per-session reminder; setting `announce_clean_scans: false` keeps Sage silent on the happy path while still allowing real threat banners through.
 
 The flag is honoured by every connector (`@gendigital/sage-openclaw`, `@gendigital/sage-claude-code`, `@gendigital/sage-opencode`, `@gendigital/sage-cursor`, `@gendigital/sage-vscode`).

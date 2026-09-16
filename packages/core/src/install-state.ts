@@ -254,7 +254,7 @@ export async function resolveSkillUploadRollout(args: {
 	 * Defaults to true — the connector delivers the notice synchronously in the
 	 * same process/turn that runs the scan (Claude Code `systemMessage`, OpenCode
 	 * toast). Pass **false** for connectors whose user-facing surface runs in a
-	 * different process or turn than the scan (OpenClaw `before_agent_start`):
+	 * different process or turn than the scan (OpenClaw `before_prompt_build`):
 	 * committing the flag here would mark the notice "shown" before the delivery
 	 * surface ever reads it, so it must be deferred to
 	 * {@link takePendingNotices} at delivery time. When false, this call does
@@ -350,7 +350,7 @@ export async function resolveSkillUploadRollout(args: {
 
 /**
  * Generic delivery-time notice resolver for connectors whose user surface runs
- * in a different process/turn than the scan (e.g. OpenClaw `before_agent_start`).
+ * in a different process/turn than the scan (e.g. OpenClaw `before_prompt_build`).
  *
  * Registry-driven and notice-agnostic: it walks {@link NOTICES}, skips any that
  * are already shown (`noticed: true`) or not currently eligible (per each
